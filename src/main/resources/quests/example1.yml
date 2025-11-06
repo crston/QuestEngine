@@ -1,0 +1,48 @@
+name: "돌 캐기"
+id: stone_break
+event: BLOCK_BREAK
+target: STONE
+amount: 10
+repeat: -1
+points: 1
+public: true
+party: false
+
+reset:
+  policy: DAILY
+  time: "04:00"
+
+display:
+  title: "&a돌 캐기"
+  description:
+    - "&7돌 10개를 캐서 연마하세요."
+    - "&f매일 아침 4시에 초기화됩니다."
+  progress: "&a%value%&7/&f%target%"
+  reward: "&e보상: 100 코인"
+
+conditions:
+  success:
+    - "%block_type% == STONE"
+    - "%player_level% > 20"
+  fail:
+    - "%block_type% == DIRT"
+    - "%player_level% < 10"
+
+actions:
+  accept:
+    - msg{t=&e%player%님이 '%quest_name%'을 수락했습니다} @self
+  start:
+    - msg{t=&7돌 10개를 캐세요} @self
+  success:
+    - msg{t=&a성공 보상 100 지급} @self
+    - cmd{c=eco give %player% 100} @server
+  fail:
+    - msg{t=&c조건을 만족하지 못해 실패했습니다} @self
+  cancel:
+    - msg{t=&e퀘스트를 취소했습니다} @self
+  stop:
+    - msg{t=&e관리자에 의해 중단되었습니다} @self
+  restart:
+    - msg{t=&6반복 퀘스트 다시 시작} @self
+  repeat:
+    - msg{t=&b반복 수행 시작} @self

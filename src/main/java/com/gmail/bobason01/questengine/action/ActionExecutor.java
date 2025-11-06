@@ -1,0 +1,268 @@
+package com.gmail.bobason01.questengine.action;
+
+import com.gmail.bobason01.questengine.quest.QuestDef;
+import com.gmail.bobason01.questengine.util.Msg;
+import me.clip.placeholderapi.PlaceholderAPI;
+import org.bukkit.Bukkit;
+import org.bukkit.ChatColor;
+import org.bukkit.Material;
+import org.bukkit.entity.Player;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.plugin.Plugin;
+import org.bukkit.scheduler.BukkitTask;
+
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
+import java.lang.reflect.Method;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+
+/**
+ * ActionExecutor
+ * 고성능 실행기
+ * - 문자열 파싱 최소화
+ * - MethodHandle 기반 리플렉션 호출 캐시
+ * - 스케줄러 호출 최소화
+ * - PlaceholderAPI는 조건부 호출
+ */
+public final class ActionExecutor {
+
+    private final Plugin plugin;
+    private final Msg msg;
+    private final boolean papi;
+    private final boolean mmo;
+    private final boolean ia;
+
+    private static final Map<String, Method> methodCache = new ConcurrentHashMap<>();
+    private static Class<?> mmoItemsClass;
+    private static Class<?> mmoTypeClass;
+    private static Class<?> iaCustomStackClass;
+    private static MethodHandle mmoGetItemMH;
+    private static MethodHandle iaGetInstanceMH;
+    private static MethodHandle iaGetItemStackMH;
+
+    private enum ActionType { MESSAGE, COMMAND, ITEM, DELAY }
+    private enum Target { SELF, SERVER }
+
+    private static final class ActionEntry {
+        final ActionType type;
+        final String value;
+        final int amount;
+        final long delayTicks;
+        final Target target;
+
+        ActionEntry(ActionType type, String value, int amount, long delayTicks, Target target) {
+            this.type = type;
+            this.value = value;
+            this.amount = amount;
+            this.delayTicks = delayTicks;
+            this.target = target;
+        }
+    }
+
+    private record CacheKey(String questId, String key) {}
+
+    private final Map<CacheKey, List<ActionEntry>> compiledCache = new ConcurrentHashMap<>();
+
+    public ActionExecutor(Plugin plugin, Msg msg) {
+        this.plugin = plugin;
+        this.msg = msg;
+        this.papi = Bukkit.getPluginManager().isPluginEnabled("PlaceholderAPI");
+        this.mmo = Bukkit.getPluginManager().isPluginEnabled("MMOItems");
+        this.ia = Bukkit.getPluginManager().isPluginEnabled("ItemsAdder");
+        initHooks();
+    }
+
+    private void initHooks() {
+        MethodHandles.Lookup lookup = MethodHandles.lookup();
+        if (mmo) {
+            try {
+                mmoItemsClass = Class.forName("net.Indyuce.mmoitems.MMOItems");
+                mmoTypeClass = Class.forName("net.Indyuce.mmoitems.api.Type");
+                Method getInstance = mmoItemsClass.getMethod("getInstance");
+                Object inst = getInstance.invoke(null);
+                Method getItem = mmoItemsClass.getMethod("getItem", mmoTypeClass, String.class);
+                mmoGetItemMH = lookup.unreflect(getItem).bindTo(inst);
+                plugin.getLogger().info("[QuestEngine] MMOItems hook active");
+            } catch (Throwable t) {
+                mmoGetItemMH = null;
+            }
+        }
+        if (ia) {
+            try {
+                iaCustomStackClass = Class.forName("dev.lone.itemsadder.api.CustomStack");
+                Method getInstance = iaCustomStackClass.getMethod("getInstance", String.class);
+                Method getItemStack = iaCustomStackClass.getMethod("getItemStack");
+                iaGetInstanceMH = lookup.unreflect(getInstance);
+                iaGetItemStackMH = lookup.unreflect(getItemStack);
+                plugin.getLogger().info("[QuestEngine] ItemsAdder hook active");
+            } catch (Throwable t) {
+                iaGetInstanceMH = null;
+                iaGetItemStackMH = null;
+            }
+        }
+    }
+
+    /** 퀘스트의 특정 액션 시퀀스를 실행 */
+    public void runAll(QuestDef q, String key, Player p) {
+        List<String> raw = q.actions.get(key);
+        if (raw == null || raw.isEmpty()) return;
+        CacheKey ck = new CacheKey(q.id, key);
+        List<ActionEntry> entries = compiledCache.computeIfAbsent(ck, k -> compile(raw));
+        runEntries(entries, q, p);
+    }
+
+    /** 문자열을 ActionEntry 리스트로 컴파일 */
+    private List<ActionEntry> compile(List<String> list) {
+        List<ActionEntry> out = new ArrayList<>(list.size());
+        long delay = 0L;
+        for (String line : list) {
+            if (line == null || line.isBlank()) continue;
+            String s = line.trim();
+            Target target = s.toLowerCase(Locale.ROOT).endsWith("@server") ? Target.SERVER : Target.SELF;
+            if (target == Target.SERVER) s = s.substring(0, s.length() - 7).trim();
+
+            if (s.toLowerCase(Locale.ROOT).startsWith("delay ")) {
+                delay += parseDelay(s);
+                out.add(new ActionEntry(ActionType.DELAY, "", 0, delay, target));
+                continue;
+            }
+            if (s.startsWith("msg{") || s.startsWith("message{")) {
+                String t = extract(s, "t=");
+                out.add(new ActionEntry(ActionType.MESSAGE, t, 0, delay, target));
+                continue;
+            }
+            if (s.startsWith("cmd{") || s.startsWith("command{")) {
+                String c = extract(s, "c=");
+                out.add(new ActionEntry(ActionType.COMMAND, c, 0, delay, target));
+                continue;
+            }
+            if (s.startsWith("item{")) {
+                String t = extract(s, "t=");
+                int a = parseIntSafe(extract(s, "a="), 1);
+                out.add(new ActionEntry(ActionType.ITEM, t, a, delay, target));
+                continue;
+            }
+        }
+        return out;
+    }
+
+    private void runEntries(List<ActionEntry> entries, QuestDef q, Player p) {
+        if (entries.isEmpty()) return;
+        final int[] idx = {0};
+        scheduleNext(entries, idx, 0L, q, p);
+    }
+
+    /** 동일한 지연 구간을 묶어 스케줄 */
+    private void scheduleNext(List<ActionEntry> entries, int[] idx, long prevDelay, QuestDef q, Player p) {
+        if (idx[0] >= entries.size()) return;
+        ActionEntry current = entries.get(idx[0]);
+        long delta = Math.max(0L, current.delayTicks - prevDelay);
+        BukkitTask task = Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            long nowDelay = current.delayTicks;
+            int start = idx[0];
+            while (idx[0] < entries.size() && entries.get(idx[0]).delayTicks == nowDelay) {
+                execute(entries.get(idx[0]), q, p);
+                idx[0]++;
+            }
+            scheduleNext(entries, idx, nowDelay, q, p);
+        }, delta);
+    }
+
+    private void execute(ActionEntry e, QuestDef q, Player p) {
+        switch (e.type) {
+            case DELAY -> { /* no-op */ }
+            case MESSAGE -> {
+                String txt = applyPlaceholders(p, e.value, q);
+                txt = ChatColor.translateAlternateColorCodes('&', txt);
+                if (e.target == Target.SELF) p.sendMessage(txt);
+                else {
+                    String finalTxt = txt;
+                    Bukkit.getOnlinePlayers().forEach(pl -> pl.sendMessage(finalTxt));
+                }
+            }
+            case COMMAND -> {
+                String cmd = applyPlaceholders(p, e.value, q);
+                if (e.target == Target.SELF) p.performCommand(cmd);
+                else Bukkit.dispatchCommand(Bukkit.getConsoleSender(), cmd);
+            }
+            case ITEM -> {
+                ItemStack is = createItemFast(e.value, e.amount);
+                if (is != null) p.getInventory().addItem(is);
+            }
+        }
+    }
+
+    private String applyPlaceholders(Player p, String text, QuestDef q) {
+        if (text == null || text.isEmpty()) return "";
+        String result = text.replace("%player%", p.getName()).replace("%quest_name%", q.name);
+        if (papi && result.contains("%")) {
+            try { result = PlaceholderAPI.setPlaceholders(p, result); } catch (Throwable ignored) {}
+        }
+        return result;
+    }
+
+    private long parseDelay(String s) {
+        try {
+            String[] parts = s.split(" ");
+            return Integer.parseInt(parts[1]) * 20L;
+        } catch (Throwable t) {
+            return 0L;
+        }
+    }
+
+    private int parseIntSafe(String s, int def) {
+        try { return Integer.parseInt(s.trim()); } catch (Throwable t) { return def; }
+    }
+
+    private String extract(String s, String key) {
+        int i = s.indexOf(key);
+        if (i < 0) return "";
+        int start = i + key.length();
+        int end = s.indexOf('}', start);
+        if (end < 0) end = s.length();
+        return s.substring(start, end).trim();
+    }
+
+    private ItemStack createItemFast(String id, int amount) {
+        if (id == null || id.isEmpty()) return null;
+        ItemStack result = null;
+        if (mmo && id.contains(":")) result = createMmoItem(id, amount);
+        if (result == null && ia) result = createIaItem(id, amount);
+        if (result != null) return result;
+        Material mat = Material.matchMaterial(id.toUpperCase(Locale.ROOT));
+        return mat == null ? null : new ItemStack(mat, amount);
+    }
+
+    private ItemStack createMmoItem(String id, int amount) {
+        try {
+            String[] split = id.split(":");
+            if (split.length < 2) return null;
+            String typeStr = split[0].toUpperCase(Locale.ROOT);
+            String templateId = split[1];
+            Object type = mmoTypeClass.getMethod("valueOf", String.class).invoke(null, typeStr);
+            Object item = mmoGetItemMH.invoke(type, templateId);
+            if (item == null) return null;
+            Method newBuilder = item.getClass().getMethod("newBuilder");
+            Object builder = newBuilder.invoke(item);
+            Method build = builder.getClass().getMethod("build");
+            ItemStack result = (ItemStack) build.invoke(builder);
+            result.setAmount(Math.max(1, amount));
+            return result;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private ItemStack createIaItem(String id, int amount) {
+        try {
+            Object custom = iaGetInstanceMH.invoke(id);
+            if (custom == null) return null;
+            ItemStack result = (ItemStack) iaGetItemStackMH.invoke(custom);
+            result.setAmount(Math.max(1, amount));
+            return result;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+}

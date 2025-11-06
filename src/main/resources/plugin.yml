@@ -1,0 +1,32 @@
+name: QuestEngine
+main: com.gmail.bobason01.questengine.QuestEnginePlugin
+version: 1.1.0
+api-version: "1.18"
+author: crston
+softdepend:
+  - PlaceholderAPI
+  - Vault
+  - MythicDungeons
+  - MMOCore
+  - Parties
+commands:
+  quest:
+    description: Player quest command
+    usage: /quest
+    aliases: [quests]
+    permission: questengine.player
+  questadmin:
+    description: Admin quest command
+    usage: /questadmin
+    permission: questengine.admin
+  questengine:
+    description: Dev command
+    usage: /questengine
+    permission: questengine.dev
+permissions:
+  questengine.player:
+    default: true
+  questengine.admin:
+    default: op
+  questengine.dev:
+    default: op

@@ -1,0 +1,17 @@
+quests:
+  folder: quests
+
+storage:
+  folder: playerdata
+
+party:
+  enabled: true
+  provider: auto
+
+performance:
+  async-save: true
+  cache-cleanup-minutes: 10
+  worker-threads: 4
+
+reset:
+  default-time: "04:00"

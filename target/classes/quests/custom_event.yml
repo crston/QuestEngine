@@ -1,0 +1,56 @@
+name: "터렛 설치의 달인"
+id: turret_place_master
+type: custom
+event: custom_event
+amount: 1
+points: 10
+public: true
+party: false
+
+display:
+  title: "&b⚙ 터렛 설치의 달인"
+  description:
+    - "&7터렛을 한 번 설치하면 퀘스트가 완료됩니다."
+    - "&7이 퀘스트는 Ajneb97 Turrets 플러그인과 연동됩니다."
+  reward: "&e보상: 10 코인"
+  progress: "&a%value%&7/&f%target%"
+  icon: "DISPENSER"
+
+reset:
+  policy: DAILY
+  time: "04:00"
+
+custom_event_data:
+  event: dt.ajneb97.api.TurretPlaceEvent
+  player_variable: getPlayer()
+  variables_to_capture:
+    - "%turret_world%;getLocation().getWorld().getName()"
+    - "%turret_x%;getLocation().getBlockX()"
+    - "%turret_y%;getLocation().getBlockY()"
+    - "%turret_z%;getLocation().getBlockZ()"
+
+conditions:
+  success:
+    - "%turret_world% == world"
+  fail:
+    - "%player_health% < 5"
+
+actions:
+  accept:
+    - msg{t=&7'&b터렛 설치의 달인&7' 퀘스트를 수락했습니다!} @self
+  start:
+    - msg{t=&7터렛을 설치해보세요!} @self
+  success:
+    - msg{t=&a성공! 터렛 설치를 감지했습니다!} @self
+    - msg{t=&7위치: &f(%turret_x%, %turret_y%, %turret_z%) - %turret_world%} @self
+    - cmd{c=eco give %player% 10} @server
+  fail:
+    - msg{t=&c실패! 체력이 너무 낮습니다.} @self
+  cancel:
+    - msg{t=&e퀘스트를 취소했습니다.} @self
+  stop:
+    - msg{t=&c퀘스트가 중단되었습니다.} @self
+  restart:
+    - msg{t=&6반복 퀘스트를 다시 시작합니다.} @self
+  repeat:
+    - msg{t=&b다시 도전 중...} @self
