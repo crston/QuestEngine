@@ -27,3 +27,11 @@ admin:
   reset_done: "&e%quest_name% 퀘스트 진행도가 초기화되었습니다!"
   list_header: "&6==== %player%님의 퀘스트 목록 ===="
   no_active: "&7진행 중인 퀘스트가 없습니다."
+
+list:
+  empty: "&7진행 중인 퀘스트가 없습니다."
+  header: "&e[진행 중인 퀘스트 목록]"
+  title: "&e%title% &7(%value%/%target%)"
+  desc: " &7- %desc%"
+  progress: "&f진행도 %bar% &7(%percent%%)"
+  reward: "&6보상 %reward%"

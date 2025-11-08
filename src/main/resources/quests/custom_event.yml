@@ -42,7 +42,6 @@ actions:
     - msg{t=&7터렛을 설치해보세요!} @self
   success:
     - msg{t=&a성공! 터렛 설치를 감지했습니다!} @self
-    - msg{t=&7위치: &f(%turret_x%, %turret_y%, %turret_z%) - %turret_world%} @self
     - cmd{c=eco give %player% 10} @server
   fail:
     - msg{t=&c실패! 체력이 너무 낮습니다.} @self

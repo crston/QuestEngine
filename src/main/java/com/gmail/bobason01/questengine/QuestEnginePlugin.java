@@ -14,7 +14,8 @@ import org.bukkit.Bukkit;
 import org.bukkit.plugin.PluginManager;
 import org.bukkit.plugin.java.JavaPlugin;
 
-import java.io.File;
+import java.io.*;
+import java.nio.file.Files;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -45,8 +46,13 @@ public final class QuestEnginePlugin extends JavaPlugin {
 
         saveDefaultConfig();
         saveResourceIfAbsent("messages.yml");
+
+        // 폴더 준비
         createFolderIfAbsent(getConfig().getString("quests.folder", "quests"));
         createFolderIfAbsent(getConfig().getString("storage.folder", "playerdata"));
+
+        // quests 폴더 내 예시 자동 복사
+        copyExampleQuests();
 
         msg = new Msg(this);
         actions = new ActionExecutor(this, msg);
@@ -63,11 +69,11 @@ public final class QuestEnginePlugin extends JavaPlugin {
         new QuestAdminCommand(this);
         new QuestEngineCommand(this);
 
-        // 비동기 예열: 캐시 빌드 + 디스크 접근 warm-up
+        // 비동기 예열
         CompletableFuture.runAsync(() -> {
             try {
                 engine.refreshEventCache();
-                progress.preloadAll(); // optional, 캐시 예열 메서드 있으면 추가
+                progress.preloadAll();
             } catch (Throwable t) {
                 getLogger().warning("[QuestEngine] async warmup failed: " + t.getMessage());
             }
@@ -96,6 +102,10 @@ public final class QuestEnginePlugin extends JavaPlugin {
     public Engine engine() { return engine; }
     public Msg msg() { return msg; }
 
+    // ---------------------------------------------------------
+    // 유틸리티
+    // ---------------------------------------------------------
+
     private void saveResourceIfAbsent(String path) {
         File f = new File(getDataFolder(), path);
         if (!f.exists()) {
@@ -109,6 +119,50 @@ public final class QuestEnginePlugin extends JavaPlugin {
         File dir = new File(getDataFolder(), name);
         if (!dir.exists() && !dir.mkdirs()) {
             getLogger().warning("[QuestEngine] Failed to create folder: " + name);
+        }
+    }
+
+    /**
+     * quests/example.yml 자동 생성
+     */
+    private void copyExampleQuests() {
+        File questsDir = new File(getDataFolder(), "quests");
+
+        // quests 폴더가 없으면 새로 만들고 내부 리소스 전체 복사
+        if (!questsDir.exists()) {
+            if (questsDir.mkdirs()) {
+                getLogger().info("[QuestEngine] Created quests directory. Copying default quests...");
+            } else {
+                getLogger().warning("[QuestEngine] Failed to create quests directory.");
+                return;
+            }
+
+            try {
+                // JAR 내부의 quests 폴더에 포함된 리소스 목록을 가져옴
+                // (리소스 파일이 JAR에 패키징되어 있어야 함)
+                String[] defaults = new String[] {
+                        "quests/example1.yml",
+                        "quests/example1_en.yml",
+                        "quests/custom_event.yml"
+                };
+
+                for (String resourcePath : defaults) {
+                    try (InputStream in = getResource(resourcePath)) {
+                        if (in == null) {
+                            getLogger().warning("[QuestEngine] Missing resource: " + resourcePath);
+                            continue;
+                        }
+
+                        File target = new File(questsDir, new File(resourcePath).getName());
+                        Files.copy(in, target.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                        getLogger().info("[QuestEngine] Copied default quest: " + target.getName());
+                    }
+                }
+            } catch (Exception e) {
+                getLogger().warning("[QuestEngine] Failed to copy default quests: " + e.getMessage());
+            }
+        } else {
+            getLogger().info("[QuestEngine] Quests folder already exists, skipping default copy.");
         }
     }
 }

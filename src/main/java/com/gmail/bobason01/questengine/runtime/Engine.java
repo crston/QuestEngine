@@ -15,13 +15,7 @@ import org.bukkit.event.Event;
 import java.lang.reflect.Method;
 import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -69,19 +63,20 @@ public final class Engine {
                 Math.max(4, cpus),
                 Math.max(8, cpus * 2),
                 30L, TimeUnit.SECONDS,
-                new LinkedBlockingQueue<>(8192),
+                new LinkedBlockingQueue<>(4096),
                 r -> {
                     Thread t = new Thread(r, "QuestEngine-Worker");
                     t.setDaemon(true);
+                    t.setPriority(Thread.NORM_PRIORITY + 1);
                     return t;
                 },
                 new ThreadPoolExecutor.DiscardOldestPolicy()
         );
 
-        long ttlMs = Math.max(100, plugin.getConfig().getLong("performance.condition-cache-ttl-ms", 500));
+        long ttlMs = Math.max(50, plugin.getConfig().getLong("performance.condition-cache-ttl-ms", 300));
         this.conditionTtlNanos = ttlMs * 1_000_000L;
 
-        long dedupMs = Math.max(5, plugin.getConfig().getLong("performance.event-dedup-window-ms", 15));
+        long dedupMs = Math.max(3, plugin.getConfig().getLong("performance.event-dedup-window-ms", 10));
         this.dedupWindowNanos = dedupMs * 1_000_000L;
 
         cacheEvents();
@@ -148,11 +143,17 @@ public final class Engine {
     public void listActiveTo(Player p) {
         List<String> active = progress.activeQuestIds(p.getUniqueId(), p.getName());
         if (active.isEmpty()) {
-            p.sendMessage(msg.pref("list_empty"));
+            p.sendMessage(msg.pref("list.empty"));
             return;
         }
 
-        p.sendMessage(msg.pref("list_header"));
+        p.sendMessage(msg.pref("list.header"));
+        String lineReward = msg.get("list.reward");     // ex) "§6보상 %reward%"
+        String lineProgress = msg.get("list.progress"); // ex) "§f진행도 %bar% §7(%percent%%)"
+        String lineTitle = msg.get("list.title");       // ex) "§e%title% §7(%value%/%target%)"
+        String lineDesc = msg.get("list.desc");         // ex) " §7- %desc%"
+
+        StringBuilder sb = new StringBuilder(256);
         for (String id : active) {
             QuestDef q = quests.get(id);
             if (q == null) continue;
@@ -163,25 +164,36 @@ public final class Engine {
             if (filled < 0) filled = 0;
             if (filled > 20) filled = 20;
 
-            StringBuilder a = new StringBuilder(20);
-            for (int i = 0; i < filled; i++) a.append('■');
-            StringBuilder b = new StringBuilder(20);
-            for (int i = filled; i < 20; i++) b.append('■');
+            // progress bar 생성 (GC 최소화)
+            char[] green = new char[filled];
+            char[] gray = new char[20 - filled];
+            Arrays.fill(green, '■');
+            Arrays.fill(gray, '■');
+            String bar = "§a" + new String(green) + "§7" + new String(gray);
 
-            String bar = "§a" + a + "§7" + b;
-            String title = ChatColor.translateAlternateColorCodes('&', q.display.title);
-            String reward = ChatColor.translateAlternateColorCodes('&', q.display.reward);
+            String title = q.display.title;
+            String reward = q.display.reward;
 
             p.sendMessage(" ");
-            p.sendMessage("§e" + title + " §7(" + val + "/" + q.amount + ")");
-            for (int i = 0; i < q.display.description.size(); i++) {
+            sb.setLength(0);
+            p.sendMessage(lineTitle
+                    .replace("%title%", ChatColor.translateAlternateColorCodes('&', title))
+                    .replace("%value%", Integer.toString(val))
+                    .replace("%target%", Integer.toString(q.amount)));
+
+            for (int i = 0, size = q.display.description.size(); i < size; i++) {
                 String line = q.display.description.get(i);
-                p.sendMessage(" §7- " + ChatColor.translateAlternateColorCodes('&', line));
+                p.sendMessage(lineDesc.replace("%desc%", ChatColor.translateAlternateColorCodes('&', line)));
             }
-            p.sendMessage("§f진행도 " + bar + " §7(" + Math.round(pct * 100) + "%)");
-            p.sendMessage("§6보상 " + reward);
+
+            p.sendMessage(lineProgress
+                    .replace("%bar%", bar)
+                    .replace("%percent%", Integer.toString((int) Math.round(pct * 100))));
+
+            p.sendMessage(lineReward.replace("%reward%", ChatColor.translateAlternateColorCodes('&', reward)));
         }
     }
+
 
     public void handle(Player p, String eventName, Event e) {
         if (p == null) return;

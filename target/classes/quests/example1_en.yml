@@ -1,0 +1,45 @@
+name: "Stone Mining"
+id: stone_break
+event: BLOCK_BREAK
+target: STONE
+amount: 10
+repeat: -1
+points: 1
+public: true
+party: false
+
+reset:
+  policy: DAILY
+  time: "04:00"
+
+display:
+  title: "&aStone Mining"
+  description:
+    - "&7Mine 10 stones to polish your skills."
+    - "&fResets every morning at 4 AM."
+  progress: "&a%value%&7/&f%target%"
+  reward: "&e100 Coins"
+
+conditions:
+  success:
+    - "%block_type% == STONE"
+  fail:
+    - "%block_type% == DIRT"
+
+actions:
+  accept:
+    - msg{t=&e%player% has accepted '%quest_name%'} @self
+  start:
+    - msg{t=&7Mine 10 stones} @self
+  success:
+    - msg{t=&aReward granted for success} @self
+  fail:
+    - msg{t=&cFailed to meet the conditions} @self
+  cancel:
+    - msg{t=&eQuest cancelled} @self
+  stop:
+    - msg{t=&eQuest stopped by admin} @self
+  restart:
+    - msg{t=&6Repeat quest restarted} @self
+  repeat:
+    - msg{t=&bRepeat progress started} @self
