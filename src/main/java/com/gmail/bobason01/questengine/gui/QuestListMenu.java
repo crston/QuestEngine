@@ -17,17 +17,19 @@ import org.bukkit.inventory.meta.ItemMeta;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
  * QuestListMenu
- * - 상단: 검색 / 리더보드 / 공개 퀘스트 / 정렬
- * - 하단: 페이지 이동
- * - messages.yml 완전 연동 버전
+ * - 진행 중인 퀘스트만 표시
+ * - messages.yml 기반 GUI 텍스트 완전 연동
  */
 public final class QuestListMenu implements Listener {
 
     private final QuestEnginePlugin plugin;
+    private final Pattern pagePattern = Pattern.compile("\\b(\\d+)\\b");
 
     public QuestListMenu(QuestEnginePlugin plugin) {
         this.plugin = plugin;
@@ -85,7 +87,12 @@ public final class QuestListMenu implements Listener {
     }
 
     private void drawQuests(Player p, Inventory inv, int page) {
-        List<QuestDef> all = new ArrayList<>(safeAll());
+        List<String> activeIds = plugin.engine().progress().activeQuestIds(p.getUniqueId(), p.getName());
+        List<QuestDef> all = activeIds.stream()
+                .map(id -> plugin.engine().quests().get(id))
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
+
         String q = getSearch(p);
         if (q != null && !q.trim().isEmpty()) {
             String needle = ChatColor.stripColor(q).toLowerCase(Locale.ROOT);
@@ -131,20 +138,20 @@ public final class QuestListMenu implements Listener {
         int slot = e.getRawSlot();
         int page = getCurrentPage(p, e);
 
-        // ----------------------- 상단 버튼 -----------------------
-        if (slot == 1) { // 리더보드
+        // 상단 버튼들
+        if (slot == 1) {
             plugin.gui().sound(p, "click");
             Bukkit.getScheduler().runTaskLater(plugin, () -> plugin.gui().openLeaderboard(p), 1L);
             return;
         }
 
-        if (slot == 2) { // 공개 퀘스트
+        if (slot == 2) {
             plugin.gui().sound(p, "click");
             Bukkit.getScheduler().runTaskLater(plugin, () -> plugin.gui().openPublic(p), 1L);
             return;
         }
 
-        if (slot == 0) { // 검색
+        if (slot == 0) {
             p.closeInventory();
             ChatInput.get().await(p, plugin.msg().get("gui.list.search_prompt"), (pp, text) -> {
                 setSearch(pp, text == null ? "" : text.trim());
@@ -153,7 +160,7 @@ public final class QuestListMenu implements Listener {
             return;
         }
 
-        if (slot == 8) { // 정렬
+        if (slot == 8) {
             boolean next = !getAsc(p);
             plugin.gui().putSession(p, "list_sort_asc", next);
             String order = plugin.msg().get(next ? "gui.list.order_asc" : "gui.list.order_desc");
@@ -165,7 +172,7 @@ public final class QuestListMenu implements Listener {
             return;
         }
 
-        // ----------------------- 페이지 이동 -----------------------
+        // 페이지 이동
         if (slot == 45) {
             int newPage = Math.max(0, page - 1);
             plugin.gui().sound(p, "page");
@@ -193,11 +200,11 @@ public final class QuestListMenu implements Listener {
             return;
         }
 
-        // ----------------------- 퀘스트 클릭 -----------------------
+        // 퀘스트 클릭
         ItemStack clicked = e.getCurrentItem();
         if (clicked == null || !clicked.hasItemMeta()) return;
         String name = ChatColor.stripColor(clicked.getItemMeta().getDisplayName());
-        QuestDef d = findByDisplayName(name);
+        QuestDef d = findByDisplayName(name, p);
         if (d == null) return;
 
         if (e.getClick().isLeftClick()) {
@@ -226,13 +233,14 @@ public final class QuestListMenu implements Listener {
     private int getCurrentPage(Player p, InventoryClickEvent e) {
         Object obj = plugin.gui().getSession(p, "list_page");
         if (obj instanceof Integer i) return i;
-        String title = e.getView().getTitle();
-        try {
-            if (title.contains("페이지")) {
-                String num = title.split("페이지 ")[1];
-                return Math.max(0, Integer.parseInt(ChatColor.stripColor(num)) - 1);
-            }
-        } catch (Exception ignored) {}
+
+        String title = ChatColor.stripColor(e.getView().getTitle());
+        Matcher m = pagePattern.matcher(title);
+        if (m.find()) {
+            try {
+                return Math.max(0, Integer.parseInt(m.group(1)) - 1);
+            } catch (NumberFormatException ignored) {}
+        }
         return 0;
     }
 
@@ -276,30 +284,12 @@ public final class QuestListMenu implements Listener {
         return it;
     }
 
-    private Collection<QuestDef> safeAll() {
-        try {
-            Object all = plugin.engine().quests().all();
-            if (all instanceof Map<?, ?> map)
-                return map.values().stream().filter(v -> v instanceof QuestDef).map(v -> (QuestDef) v).toList();
-            if (all instanceof Collection<?> col)
-                return col.stream().filter(v -> v instanceof QuestDef).map(v -> (QuestDef) v).toList();
-        } catch (Throwable ignored) {}
-        try {
-            Collection<String> ids = plugin.engine().quests().ids();
-            List<QuestDef> out = new ArrayList<>();
-            for (String id : ids) {
-                QuestDef q = plugin.engine().quests().get(id);
-                if (q != null) out.add(q);
+    private QuestDef findByDisplayName(String display, Player p) {
+        for (String id : plugin.engine().progress().activeQuestIds(p.getUniqueId(), p.getName())) {
+            QuestDef q = plugin.engine().quests().get(id);
+            if (q != null && display.equalsIgnoreCase(ChatColor.stripColor(displayNameOf(q)))) {
+                return q;
             }
-            return out;
-        } catch (Throwable t) {
-            return Collections.emptyList();
-        }
-    }
-
-    private QuestDef findByDisplayName(String display) {
-        for (QuestDef q : safeAll()) {
-            if (display.equalsIgnoreCase(ChatColor.stripColor(displayNameOf(q)))) return q;
         }
         return null;
     }
@@ -307,11 +297,6 @@ public final class QuestListMenu implements Listener {
     private String displayNameOf(QuestDef q) {
         try {
             Method m = q.getClass().getMethod("getDisplayName");
-            Object v = m.invoke(q);
-            if (v != null) return String.valueOf(v);
-        } catch (Throwable ignored) {}
-        try {
-            Method m = q.getClass().getMethod("name");
             Object v = m.invoke(q);
             if (v != null) return String.valueOf(v);
         } catch (Throwable ignored) {}
@@ -335,9 +320,7 @@ public final class QuestListMenu implements Listener {
             Method m = q.getClass().getMethod("getLore");
             Object v = m.invoke(q);
             if (v instanceof List<?> l) {
-                List<String> out = new ArrayList<>();
-                for (Object o : l) out.add(String.valueOf(o));
-                return out;
+                return l.stream().map(String::valueOf).collect(Collectors.toList());
             }
         } catch (Throwable ignored) {}
         return Collections.emptyList();
