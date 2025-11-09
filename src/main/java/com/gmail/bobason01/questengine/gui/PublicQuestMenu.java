@@ -120,8 +120,7 @@ public final class PublicQuestMenu implements Listener {
 
             // ── 구분선
             lore.add(" ");
-            lore.add("&a좌클릭: &7수락");
-            lore.add("&c우클릭: &7취소");
+            lore.add(plugin.msg().get("gui.list.left_click_start"));
 
             inv.setItem(slots[idx++], icon(iconOf(qd), "&f" + displayNameOf(qd), lore));
         }
@@ -185,14 +184,6 @@ public final class PublicQuestMenu implements Listener {
             } catch (Throwable t) {
                 p.sendMessage(plugin.msg().pref("gui.public.error_accept"));
             }
-            return;
-        }
-
-        if (e.getClick().isRightClick()) {
-            plugin.engine().cancelQuest(p, d);
-            plugin.gui().sound(p, "cancel");
-            p.sendMessage(plugin.msg().pref("gui.public.cancelled").replace("%quest%", displayNameOf(d)));
-            Bukkit.getScheduler().runTaskLater(plugin, () -> open(p, page), 2L);
         }
     }
 

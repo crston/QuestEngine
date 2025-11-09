@@ -77,6 +77,7 @@ gui:
     page_input: "&fGo to Page"
     page_input_lore: "&7Click and enter a page number"
     page_input_prompt: "Enter the page number to go to"
+    left_click_start: "&aLeft-click: Start quest"
     left_click_complete: "&aLeft-click: Try to complete quest"
     right_click_cancel: "&cRight-click: Cancel quest"
     quest_completed: "&aQuest completed: &f%quest%"

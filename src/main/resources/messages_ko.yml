@@ -77,6 +77,7 @@ gui:
     page_input: "&f페이지 이동"
     page_input_lore: "&7클릭 후 페이지 번호를 입력"
     page_input_prompt: "이동할 페이지 번호를 입력하세요"
+    left_click_start: "&a좌클릭: 퀘스트 수락"
     left_click_complete: "&a좌클릭: 퀘스트 완료 시도"
     right_click_cancel: "&c우클릭: 퀘스트 취소"
     quest_completed: "&a퀘스트 완료: &f%quest%"
