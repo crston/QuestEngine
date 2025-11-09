@@ -50,6 +50,11 @@ gui:
       - "&7%quest_title%"
       - "&aProgress: &f%value%/%target%"
       - "&eReward: &f%reward%"
+  confirm:
+    title: "&cConfirm Quest Cancellation: %quest%"
+    yes_lore: "&7Are you sure you want to cancel the quest '%quest%'?"
+    no_lore: "&7No, go back."
+    cancel_done: "&eThe quest '%quest%' has been cancelled."
 
   # ------------------------------
   # Personal Quest List (QuestListMenu)

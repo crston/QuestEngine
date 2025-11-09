@@ -50,6 +50,11 @@ gui:
       - "&7%quest_title%"
       - "&a진행도: &f%value%/%target%"
       - "&e보상: &f%reward%"
+  confirm:
+    title: "&c퀘스트 취소 확인: %quest%"
+    yes_lore: "&7정말 '%quest%' 퀘스트를 취소하시겠습니까?"
+    no_lore: "&7아니오, 돌아갑니다."
+    cancel_done: "&e'%quest%' 퀘스트가 취소되었습니다."
 
   # ------------------------------
   # 개인 퀘스트 목록 (QuestListMenu)
