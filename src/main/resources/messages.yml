@@ -1,37 +1,112 @@
 prefix: "&7[&aQuestEngine&7] "
 
-vault_missing: "&cVault 플러그인을 찾을 수 없습니다. 일부 기능이 비활성화됩니다."
-quest_already_active: "&c이미 진행 중인 퀘스트입니다."
-quest_started: "&a'%quest_name%' 퀘스트를 시작했습니다!"
-quest_not_active: "&c해당 퀘스트는 진행 중이 아닙니다."
-quest_canceled: "&e'%quest_name%' 퀘스트를 취소했습니다."
-quest_stopped: "&7'%quest_name%' 퀘스트를 강제로 중단했습니다."
-abandon_all_done: "&7모든 퀘스트를 포기했습니다."
-list_empty: "&7진행 중인 퀘스트가 없습니다."
-list_header: "&a===== &f진행 중인 퀘스트 목록 &a====="
+vault_missing: "&cVault plugin not found. Some features are disabled."
+quest_already_active: "&cYou are already on this quest."
+quest_started: "&aYou have started the quest '%quest_name%'!"
+quest_not_active: "&cYou are not currently on this quest."
+quest_canceled: "&eYou have canceled the quest '%quest_name%'."
+quest_stopped: "&7The quest '%quest_name%' has been forcibly stopped."
+abandon_all_done: "&7All active quests have been abandoned."
+list_empty: "&7You have no active quests."
+list_header: "&a===== &fActive Quest List &a====="
 list_line: "&f- &a%quest_name% &7(&e%value% / %target%&7)"
-quest_completed: "&6'%quest_name%' 퀘스트 완료! 보상 획득!"
-reload_done: "&a퀘스트 설정을 다시 불러왔습니다."
-invalid_args: "&c잘못된 명령어 인자입니다."
-player_only: "&c플레이어만 사용할 수 있습니다."
-quest_repeat_ready: "&6%quest_name% 퀘스트를 다시 시작할 수 있습니다. /quest start %quest_id% 로 재도전!"
+quest_completed: "&6Quest '%quest_name%' completed! Reward received!"
+reload_done: "&aQuest configuration reloaded successfully."
+invalid_args: "&cInvalid command arguments."
+player_only: "&cThis command can only be used by players."
+quest_repeat_ready: "&6Quest '%quest_name%' is available again. Retry with /quest start %quest_id%!"
 
 admin:
   usage: "&7/questadmin <reload|give|complete|stop|reset|list>"
-  reloaded: "&a모든 퀘스트를 새로고침했습니다!"
-  invalid_args: "&c잘못된 인자입니다!"
-  offline: "&c플레이어가 오프라인입니다!"
-  started: "&a%quest_name% 퀘스트를 시작했습니다!"
-  stopped: "&c%quest_name% 퀘스트를 중단했습니다!"
-  completed: "&b%quest_name% 퀘스트를 완료 처리했습니다!"
-  reset_done: "&e%quest_name% 퀘스트 진행도가 초기화되었습니다!"
-  list_header: "&6==== %player%님의 퀘스트 목록 ===="
-  no_active: "&7진행 중인 퀘스트가 없습니다."
+  reloaded: "&aAll quests reloaded successfully!"
+  invalid_args: "&cInvalid arguments!"
+  offline: "&cThe player is offline!"
+  started: "&aStarted the quest: %quest_name%"
+  stopped: "&cStopped the quest: %quest_name%"
+  completed: "&bManually completed the quest: %quest_name%"
+  reset_done: "&eQuest progress reset for: %quest_name%"
+  list_header: "&6==== Quests of %player% ===="
+  no_active: "&7No active quests."
 
 list:
-  empty: "&7진행 중인 퀘스트가 없습니다."
-  header: "&e[진행 중인 퀘스트 목록]"
+  empty: "&7You have no active quests."
+  header: "&e[Active Quest List]"
   title: "&e%title% &7(%value%/%target%)"
   desc: " &7- %desc%"
-  progress: "&f진행도 %bar% &7(%percent%%)"
-  reward: "&6보상 %reward%"
+  progress: "&fProgress %bar% &7(%percent%%)"
+  reward: "&6Reward %reward%"
+  points: "&fYour Quest Points: &a%points%"
+
+# ==========================================================
+# GUI
+# ==========================================================
+gui:
+  title:
+    list: "&aActive Quests"
+    public: "&bPublic Quests"
+    leaderboard: "&6Leaderboard"
+  lore:
+    list:
+      - "&7%quest_title%"
+      - "&aProgress: &f%value%/%target%"
+      - "&eReward: &f%reward%"
+
+  # ------------------------------
+  # Personal Quest List (QuestListMenu)
+  # ------------------------------
+  list:
+    title: "&bQuest List &7| &fPage %page%"
+    search: "&f🔍 Search"
+    search_lore: "&7Click to enter a search keyword"
+    search_prompt: "Enter a keyword (leave blank for all)"
+    leaderboard: "&6🏆 Leaderboard"
+    leaderboard_lore: "&7Click to view quest rankings"
+    public: "&b📖 Public Quests"
+    public_lore: "&7Click to open the public quest list"
+    sort: "&fSort: &e%order%"
+    sort_lore: "&7Click to change the sorting order"
+    order_asc: "Ascending"
+    order_desc: "Descending"
+    prev: "&fPrevious Page"
+    next: "&fNext Page"
+    page_input: "&fGo to Page"
+    page_input_lore: "&7Click and enter a page number"
+    page_input_prompt: "Enter the page number to go to"
+    left_click_complete: "&aLeft-click: Try to complete quest"
+    right_click_cancel: "&cRight-click: Cancel quest"
+    quest_completed: "&aQuest completed: &f%quest%"
+    quest_cancelled: "&7Quest cancelled: &f%quest%"
+    quest_cannot_complete: "&cYou don’t meet the completion conditions."
+    quest_complete_error: "&cAn error occurred while completing the quest."
+    method_missing: "&cCould not find completion method."
+
+  # ------------------------------
+  # Public Quest List (PublicQuestMenu)
+  # ------------------------------
+  public:
+    title: "&bPublic Quests | &fPage %page%"
+    back: "&f← Back to My Quests"
+    back_lore: "&7Click to return to your quest list"
+    search: "&f🔍 Search"
+    search_lore: "&7Click to enter a keyword for public quests"
+    search_prompt: "Enter a keyword (leave blank for all)"
+    prev: "&fPrevious Page"
+    prev_lore: "&7Click to go to the previous page"
+    next: "&fNext Page"
+    next_lore: "&7Click to go to the next page"
+    accept_lore: "&aLeft-click: Accept quest"
+    cancel_lore: "&cRight-click: Cancel quest"
+    accepted: "&aAccepted quest '%quest%'!"
+    cancelled: "&eCancelled quest '%quest%'."
+    error_accept: "&cAn error occurred while accepting the quest."
+
+  # ------------------------------
+  # Leaderboard (LeaderboardMenu)
+  # ------------------------------
+  leaderboard:
+    title: "&6Quest Leaderboard"
+    back: "&f← Back to My Quests"
+    back_lore: "&7Click to return to your personal quest list"
+    rank_format: "&e#%rank% &f%player% &7- &a%points% pts"
+    rank_points: "&7Points: &f%points%"
+    no_data: "&7No data to display."

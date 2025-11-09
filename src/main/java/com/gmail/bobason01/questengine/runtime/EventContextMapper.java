@@ -1,44 +1,51 @@
 package com.gmail.bobason01.questengine.runtime;
 
+import io.lumine.mythic.bukkit.events.MythicMobDeathEvent;
+import io.lumine.mythic.bukkit.events.MythicMobSpawnEvent;
+import org.bukkit.Bukkit;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.Event;
+import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.event.block.BlockEvent;
+import org.bukkit.event.block.BlockPlaceEvent;
+import org.bukkit.event.entity.*;
+import org.bukkit.event.inventory.CraftItemEvent;
+import org.bukkit.event.player.*;
+import org.bukkit.inventory.ItemStack;
 
 import java.lang.reflect.Method;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * EventContextMapper
- * - Bukkit 이벤트 → 조건 평가용 컨텍스트 맵 자동 변환기
- * - 리플렉션 캐시 기반 극한의 성능 중심 버전
- */
 public final class EventContextMapper {
 
     private EventContextMapper() {}
 
-    // 클래스별 get 메서드 캐시
     private static final Map<Class<?>, Method[]> METHOD_CACHE = new ConcurrentHashMap<>(128);
-
-    // 플레이어 추출 캐시
     private static final Map<Class<?>, Method> PLAYER_METHOD_CACHE = new ConcurrentHashMap<>(64);
 
-    // ThreadLocal 재사용 맵 (GC 최소화)
     private static final ThreadLocal<Map<String, Object>> LOCAL_MAP =
-            ThreadLocal.withInitial(() -> new HashMap<>(32));
+            ThreadLocal.withInitial(() -> new HashMap<>(48));
 
-    /**
-     * 이벤트에서 자동 컨텍스트 추출
-     * key: "event_fieldname" 형태
-     */
+    public static void prewarm(Class<?>... eventClasses) {
+        if (eventClasses == null || eventClasses.length == 0) return;
+        for (Class<?> cls : eventClasses) {
+            try {
+                if (cls == null) continue;
+                METHOD_CACHE.computeIfAbsent(cls, EventContextMapper::scanGetters);
+                PLAYER_METHOD_CACHE.computeIfAbsent(cls, EventContextMapper::findPlayerGetter);
+            } catch (Throwable ignored) {}
+        }
+    }
+
     public static Map<String, Object> map(Event e) {
         if (e == null) return Collections.emptyMap();
 
         Map<String, Object> ctx = LOCAL_MAP.get();
         ctx.clear();
 
-        Class<?> clz = e.getClass();
-        Method[] methods = METHOD_CACHE.computeIfAbsent(clz, EventContextMapper::scanGetters);
-
+        Method[] methods = METHOD_CACHE.computeIfAbsent(e.getClass(), EventContextMapper::scanGetters);
         for (Method m : methods) {
             try {
                 Object val = m.invoke(e);
@@ -48,42 +55,21 @@ public final class EventContextMapper {
             } catch (Throwable ignored) {}
         }
 
-        return new HashMap<>(ctx); // 반환 시 복사 (ThreadLocal 재사용)
+        injectShortcuts(e, ctx);
+        return new HashMap<>(ctx);
     }
 
-    /**
-     * 플레이어 객체를 이벤트에서 자동 추출
-     * getPlayer / getWhoClicked / getEntity 등 탐색
-     */
     public static Player extractPlayer(Event e) {
         if (e == null) return null;
-        Class<?> clz = e.getClass();
-
-        Method m = PLAYER_METHOD_CACHE.computeIfAbsent(clz, k -> {
-            for (Method md : k.getMethods()) {
-                if (md.getParameterCount() != 0) continue;
-                String n = md.getName();
-                if (n.equalsIgnoreCase("getPlayer")
-                        || n.equalsIgnoreCase("getWhoClicked")
-                        || n.equalsIgnoreCase("getEntity")) {
-                    return md;
-                }
-            }
-            return null;
-        });
-
-        if (m != null) {
-            try {
-                Object v = m.invoke(e);
-                if (v instanceof Player) return (Player) v;
-            } catch (Throwable ignored) {}
-        }
+        Method m = PLAYER_METHOD_CACHE.computeIfAbsent(e.getClass(), EventContextMapper::findPlayerGetter);
+        if (m == null) return null;
+        try {
+            Object v = m.invoke(e);
+            return v instanceof Player ? (Player) v : null;
+        } catch (Throwable ignored) {}
         return null;
     }
 
-    /**
-     * 클래스에서 유효한 getter 목록 스캔
-     */
     private static Method[] scanGetters(Class<?> clz) {
         List<Method> list = new ArrayList<>(16);
         for (Method m : clz.getDeclaredMethods()) {
@@ -97,5 +83,136 @@ public final class EventContextMapper {
             } catch (Throwable ignored) {}
         }
         return list.toArray(new Method[0]);
+    }
+
+    private static Method findPlayerGetter(Class<?> clz) {
+        for (Method m : clz.getMethods()) {
+            if (m.getParameterCount() != 0) continue;
+            String n = m.getName();
+            if (n.equalsIgnoreCase("getPlayer")
+                    || n.equalsIgnoreCase("getWhoClicked")
+                    || n.equalsIgnoreCase("getEntity")) {
+                return m;
+            }
+        }
+        return null;
+    }
+
+    private static void injectShortcuts(Event e, Map<String, Object> ctx) {
+        try {
+            // -----------------------------
+            // 기본: Player, World
+            // -----------------------------
+            Player player = extractPlayer(e);
+            if (player != null) {
+                ctx.put("player_name", player.getName());
+                if (player.getWorld() != null)
+                    ctx.put("world_name", player.getWorld().getName());
+            } else {
+                // 일부 이벤트(엔티티 기반 등)에서 플레이어 없음 → dummy
+                ctx.putIfAbsent("player_name", "unknown");
+            }
+
+            // -----------------------------
+            // 블록 관련 이벤트 (Null-safe)
+            // -----------------------------
+            if (e instanceof BlockBreakEvent be) {
+                if (be.getBlock() != null)
+                    ctx.put("block_type", be.getBlock().getType().name());
+            } else if (e instanceof BlockPlaceEvent bp) {
+                if (bp.getBlockPlaced() != null)
+                    ctx.put("block_type", bp.getBlockPlaced().getType().name());
+            } else if (e instanceof BlockEvent be2) {
+                if (be2.getBlock() != null && !ctx.containsKey("block_type"))
+                    ctx.put("block_type", be2.getBlock().getType().name());
+            }
+
+            // -----------------------------
+            // 엔티티 관련 이벤트 (안전)
+            // -----------------------------
+            if (e instanceof EntityEvent ee) {
+                Entity ent = ee.getEntity();
+                if (ent != null) {
+                    ctx.put("entity_type", ent.getType().name());
+                    if (ent.getWorld() != null)
+                        ctx.put("world_name", ent.getWorld().getName());
+                }
+            }
+
+            if (e instanceof EntityDeathEvent de) {
+                if (de.getEntity() != null)
+                    ctx.put("entity_type", de.getEntity().getType().name());
+                if (de.getEntity().getKiller() != null)
+                    ctx.put("killer_name", de.getEntity().getKiller().getName());
+            }
+
+            if (e instanceof EntityDamageByEntityEvent hit) {
+                Entity damager = hit.getDamager();
+                if (damager != null)
+                    ctx.put("damager_type", damager.getType().name());
+                Entity victim = hit.getEntity();
+                if (victim != null)
+                    ctx.put("victim_type", victim.getType().name());
+            }
+
+            // -----------------------------
+            // 아이템 관련 이벤트 (모든 null 대응)
+            // -----------------------------
+            ItemStack item = null;
+
+            if (e instanceof PlayerItemConsumeEvent ce) {
+                item = ce.getItem();
+                // 일부 Purpur 버전에서 null 반환 → 메인핸드 보정
+                if (item == null && player != null) {
+                    ItemStack hand = player.getInventory().getItemInMainHand();
+                    if (hand != null && hand.getType().isEdible())
+                        item = hand;
+                }
+            } else if (e instanceof PlayerInteractEvent ie) {
+                item = ie.getItem();
+                if (item == null && player != null)
+                    item = player.getInventory().getItemInMainHand();
+            } else if (e instanceof PlayerDropItemEvent dropE) {
+                if (dropE.getItemDrop() != null)
+                    item = dropE.getItemDrop().getItemStack();
+            } else if (e instanceof EntityPickupItemEvent pickE) {
+                if (pickE.getItem() != null)
+                    item = pickE.getItem().getItemStack();
+            } else if (e instanceof CraftItemEvent craftE) {
+                if (craftE.getRecipe() != null)
+                    item = craftE.getRecipe().getResult();
+            }
+
+            if (item != null && item.getType() != null) {
+                ctx.put("item_type", item.getType().name());
+                if (item.hasItemMeta() && item.getItemMeta().hasDisplayName())
+                    ctx.put("item_name", item.getItemMeta().getDisplayName());
+            } else {
+                ctx.putIfAbsent("item_type", "AIR");
+            }
+
+            // -----------------------------
+            // MythicMobs 이벤트 (안전)
+            // -----------------------------
+            if (e instanceof MythicMobDeathEvent mm) {
+                if (mm.getMobType() != null)
+                    ctx.put("mythicmob_type", mm.getMobType().getInternalName());
+            } else if (e instanceof MythicMobSpawnEvent ms) {
+                if (ms.getMobType() != null)
+                    ctx.put("mythicmob_type", ms.getMobType().getInternalName());
+            }
+
+            // -----------------------------
+            // 기본값 보정 (안전 장치)
+            // -----------------------------
+            ctx.putIfAbsent("world_name", "unknown_world");
+            ctx.putIfAbsent("entity_type", "UNKNOWN");
+            ctx.putIfAbsent("block_type", "AIR");
+            ctx.putIfAbsent("item_name", "");
+            ctx.putIfAbsent("item_type", "AIR");
+
+        } catch (Throwable ex) {
+            Bukkit.getLogger().warning("[QuestEngine] ContextMapper failed for " + e.getEventName() + ": " + ex.getMessage());
+        }
     }
 }

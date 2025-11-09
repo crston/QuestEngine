@@ -1,0 +1,16 @@
+name: "Fisherman"
+id: fishing
+event: FISHING
+amount: 5
+points: 4
+
+display:
+  title: "&bFisherman"
+  description:
+    - "&7Catch fish 5 times."
+  reward: "&eReward: 150 Coins"
+
+actions:
+  success:
+    - msg{t="&bFishing complete! You earned 150 Coins!"} @self
+    - command{c="eco give %player% 150"} @server

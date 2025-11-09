@@ -1,0 +1,26 @@
+name: "Stone Miner"
+id: stone_break
+event: BLOCK_BREAK
+target: STONE
+amount: 10
+points: 5
+public: true
+party: false
+
+display:
+  title: "&aStone Miner"
+  description:
+    - "&7Mine 10 stone blocks."
+  progress: "&a%value%/%target%"
+  reward: "&eReward: 100 Coins + 50 EXP"
+
+conditions:
+  success:
+    - "%player_level% >= 10"
+
+actions:
+  accept:
+    - msg{t="&7You have started the Stone Mining quest!"} @self
+  success:
+    - msg{t="&aStone Mining completed! Rewards granted!"} @self
+    - command{c="eco give %

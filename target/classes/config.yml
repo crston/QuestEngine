@@ -1,17 +1,87 @@
+# ==============================================================
+# QuestEngine - Main Configuration
+# Extreme Performance & Modular Design
+# ==============================================================
+
+# --------------------------------------------------------------
+# Performance settings
+# --------------------------------------------------------------
+performance:
+  # Condition evaluation cache TTL (ms)
+  # Reuses cached results for identical conditions evaluated repeatedly in a short time.
+  # Too low → higher CPU usage; too high → delayed updates.
+  condition-cache-ttl-ms: 300
+
+  # Event deduplication window (ms)
+  # Filters out identical events triggered too rapidly in succession.
+  # 10ms is usually enough to prevent duplicates from rapid block breaks or item use.
+  event-dedup-window-ms: 10
+
+# --------------------------------------------------------------
+# Reset (Daily quest reset schedule)
+# --------------------------------------------------------------
+reset:
+  # Default reset time if not specified in individual quest YAMLs
+  default-time: "04:00"  # Default: 4 AM KST
+
+# --------------------------------------------------------------
+# Storage settings
+# --------------------------------------------------------------
+storage:
+  # Choose the storage type
+  # - FILE   : Fast and simple (small servers)
+  # - YAML   : Human-readable format
+  # - SQLITE : Built-in lightweight database (medium servers)
+  # - MYSQL  : External database (large-scale servers)
+  type: SQLITE
+
+  # File storage configuration (type: FILE)
+  file:
+    folder: data/playerdata
+
+  # YAML storage configuration (type: YAML)
+  yaml:
+    folder: data/playerdata_yaml
+
+  # SQLite storage configuration (type: SQLITE)
+  sqlite:
+    file: data/questengine.db
+
+  # MySQL storage configuration (type: MYSQL)
+  mysql:
+    host: localhost
+    port: 3306
+    database: questengine
+    user: root
+    password: ""
+    # Advanced options (usually do not need to change)
+    options:
+      useSSL: false
+      characterEncoding: utf8
+      serverTimezone: UTC
+      rewriteBatchedStatements: true
+
+# --------------------------------------------------------------
+# Quest folder settings
+# --------------------------------------------------------------
 quests:
+  # Folder that contains quest definitions (plugins/QuestEngine/quests)
   folder: quests
 
-storage:
-  folder: playerdata
-
+# --------------------------------------------------------------
+# Party integration
+# --------------------------------------------------------------
 party:
+  # Enable shared quests for parties
   enabled: true
+  # Supported party systems (auto: auto-detect)
   provider: auto
 
-performance:
-  async-save: true
-  cache-cleanup-minutes: 10
-  worker-threads: 4
-
-reset:
-  default-time: "04:00"
+# --------------------------------------------------------------
+# Debug & logging
+# --------------------------------------------------------------
+debug:
+  enabled: false
+  log-events: false
+  log-conditions: false
+  log-actions: false

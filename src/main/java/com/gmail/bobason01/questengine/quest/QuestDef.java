@@ -8,16 +8,16 @@ import java.util.*;
 
 /**
  * QuestDef
- * - YAML 퀘스트 정의 로더 (고성능 버전)
- * - 문자열, 컬렉션, 맵 객체 생성 최소화
- * - TPS 영향 없는 구조 (수백 개 퀘스트 로드에도 <10ms)
+ * - 퀘스트 정의 데이터 클래스 (불변)
+ * - 모든 필드는 로드 시 확정되어 이후 변경 불가
+ * - extreme performance 기반 구조 (copy-once immutable)
  */
 public final class QuestDef {
 
     public final String id;
     public final String name;
     public final String event;
-    public final String target;
+    public final List<String> targets;
     public final int amount;
     public final int repeat;
     public final int points;
@@ -30,15 +30,13 @@ public final class QuestDef {
     public final List<String> condSuccess;
     public final List<String> condFail;
     public final Map<String, List<String>> actions;
+    public final int hash;
 
-    // ------------------------------------------------------------------------
-    // 생성자
-    // ------------------------------------------------------------------------
-    QuestDef(
+    public QuestDef(
             String id,
             String name,
             String event,
-            String target,
+            List<String> targets,
             int amount,
             int repeat,
             int points,
@@ -50,67 +48,113 @@ public final class QuestDef {
             CustomEventData custom,
             List<String> condSuccess,
             List<String> condFail,
-            Map<String, List<String>> actions) {
-
+            Map<String, List<String>> actions
+    ) {
         this.id = id.intern();
         this.name = name;
-        this.event = event;
-        this.target = target;
+        this.event = event.toUpperCase(Locale.ROOT).intern();
+        this.targets = (targets == null || targets.isEmpty()) ? List.of() : List.copyOf(targets);
         this.amount = amount;
         this.repeat = repeat;
         this.points = points;
         this.isPublic = isPublic;
         this.party = party;
-        this.type = type == null ? "vanilla" : type.toLowerCase(Locale.ROOT).intern();
+        this.type = (type == null ? "vanilla" : type.toLowerCase(Locale.ROOT).intern());
         this.reset = reset;
         this.display = display;
         this.custom = custom;
-        this.condSuccess = condSuccess == null || condSuccess.isEmpty() ? List.of() : List.copyOf(condSuccess);
-        this.condFail = condFail == null || condFail.isEmpty() ? List.of() : List.copyOf(condFail);
-        this.actions = actions == null || actions.isEmpty() ? Map.of() : Map.copyOf(actions);
+        this.condSuccess = (condSuccess == null || condSuccess.isEmpty()) ? List.of() : List.copyOf(condSuccess);
+        this.condFail = (condFail == null || condFail.isEmpty()) ? List.of() : List.copyOf(condFail);
+        this.actions = (actions == null || actions.isEmpty()) ? Map.of() : Map.copyOf(actions);
+
+        this.hash = computeHash();
     }
 
-    // ------------------------------------------------------------------------
-    // 퀘스트 파일 로더
-    // ------------------------------------------------------------------------
+    private int computeHash() {
+        int h = id.hashCode();
+        h = 31 * h + event.hashCode();
+        for (String t : targets) {
+            h = 31 * h + t.hashCode();
+        }
+        h = 31 * h + amount;
+        h = 31 * h + points;
+        return h;
+    }
+
+    public boolean hasTarget() {
+        return !targets.isEmpty();
+    }
+
+    public boolean matchesTarget(String candidate) {
+        if (!hasTarget()) return true;
+        if (candidate == null) return false;
+        for (String t : targets) {
+            if (t.equalsIgnoreCase(candidate)) return true;
+        }
+        return false;
+    }
+
+    // ============================================================
+    // YAML 로드
+    // ============================================================
     public static QuestDef load(File file) {
-        final YamlConfiguration yml = YamlConfiguration.loadConfiguration(file);
-        final String id = file.getName().replace(".yml", "");
+        YamlConfiguration yml = YamlConfiguration.loadConfiguration(file);
+        String id = file.getName().replace(".yml", "");
+        String name = yml.getString("name", id);
+        String event = yml.getString("event", "CUSTOM");
+        int amount = yml.getInt("amount", 1);
+        int repeat = yml.getInt("repeat", 0);
+        int points = yml.getInt("points", 0);
+        boolean pub = yml.getBoolean("public", false);
+        boolean party = yml.getBoolean("party", false);
+        String type = yml.getString("type", "vanilla");
 
-        final String name = yml.getString("name", id);
-        final String event = yml.getString("event", "CUSTOM");
-        final String target = yml.getString("target", "");
-        final int amount = yml.getInt("amount", 1);
-        final int repeat = yml.getInt("repeat", 0);
-        final int points = yml.getInt("points", 0);
-        final boolean pub = yml.getBoolean("public", false);
-        final boolean party = yml.getBoolean("party", false);
-        final String type = yml.getString("type", "vanilla");
-
-        final Reset reset = new Reset(
+        Reset reset = new Reset(
                 yml.getString("reset.policy", ""),
                 yml.getString("reset.time", "")
         );
 
-        final Display display = new Display(readDisplay(yml.getConfigurationSection("display")));
+        Display display = new Display(readDisplay(yml.getConfigurationSection("display")));
 
-        final ConfigurationSection ce = yml.getConfigurationSection("custom_event_data");
-        final CustomEventData custom = (ce != null) ? CustomEventData.load(ce) : null;
+        CustomEventData custom = null;
+        ConfigurationSection ce = yml.getConfigurationSection("custom_event_data");
+        if (ce != null) custom = CustomEventData.load(ce);
 
-        final List<String> condSuccess = yml.getStringList("conditions.success");
-        final List<String> condFail = yml.getStringList("conditions.fail");
+        List<String> condSuccess = yml.getStringList("conditions.success");
+        List<String> condFail = yml.getStringList("conditions.fail");
 
-        final Map<String, List<String>> actions = readActions(yml.getConfigurationSection("actions"));
+        List<String> targets = new ArrayList<>();
+        if (yml.contains("targets")) {
+            for (String s : yml.getStringList("targets")) {
+                if (s != null && !s.isBlank()) targets.add(s.trim());
+            }
+        } else if (yml.contains("target")) {
+            String single = yml.getString("target", "").trim();
+            if (!single.isEmpty()) targets.add(single);
+        }
+
+        Map<String, List<String>> actions = readActions(yml.getConfigurationSection("actions"));
 
         return new QuestDef(
-                id, name, event, target, amount, repeat, points, pub, party,
-                type, reset, display, custom, condSuccess, condFail, actions
+                id,
+                name,
+                event,
+                targets,
+                amount,
+                repeat,
+                points,
+                pub,
+                party,
+                type,
+                reset,
+                display,
+                custom,
+                condSuccess,
+                condFail,
+                actions
         );
     }
 
-    // ------------------------------------------------------------------------
-    // 서브 로드 유틸
-    // ------------------------------------------------------------------------
     private static Map<String, Object> readDisplay(ConfigurationSection s) {
         if (s == null) return Collections.emptyMap();
         Map<String, Object> map = new LinkedHashMap<>(8);
@@ -131,9 +175,20 @@ public final class QuestDef {
         return map;
     }
 
-    // ------------------------------------------------------------------------
-    // Display 내부 클래스
-    // ------------------------------------------------------------------------
+    // ============================================================
+    // 게터 (GUI 및 외부 참조용)
+    // ============================================================
+    public boolean isPublic() {
+        return isPublic;
+    }
+
+    public Display display() {
+        return display;
+    }
+
+    // ============================================================
+    // 내부 클래스
+    // ============================================================
     public static final class Display {
         public final String title;
         public final List<String> description;
@@ -145,10 +200,10 @@ public final class QuestDef {
         public final String hint;
 
         public Display(Map<String, Object> raw) {
-            this.title = str(raw, "title", "&f이름 없는 퀘스트");
+            this.title = str(raw, "title", "&fNo Name Quest");
             this.description = list(raw, "description");
             this.progress = str(raw, "progress", "&7%value%/%target%");
-            this.reward = str(raw, "reward", "&e보상 없음");
+            this.reward = str(raw, "reward", "&eNo Rewards");
             this.category = str(raw, "category", "");
             this.difficulty = str(raw, "difficulty", "");
             this.icon = str(raw, "icon", "BOOK");
@@ -162,7 +217,8 @@ public final class QuestDef {
 
         private static List<String> list(Map<String, Object> m, String k) {
             Object o = m.get(k);
-            if (o instanceof List<?> l) {
+            if (o instanceof List<?>) {
+                List<?> l = (List<?>) o;
                 if (l.isEmpty()) return List.of();
                 List<String> out = new ArrayList<>(l.size());
                 for (Object x : l) out.add(String.valueOf(x));
@@ -174,12 +230,10 @@ public final class QuestDef {
         }
     }
 
-    // ------------------------------------------------------------------------
-    // Reset 내부 클래스
-    // ------------------------------------------------------------------------
     public static final class Reset {
         public final String policy;
         public final String time;
+
         public Reset(String policy, String time) {
             this.policy = (policy == null) ? "" : policy.trim();
             this.time = (time == null) ? "" : time.trim();

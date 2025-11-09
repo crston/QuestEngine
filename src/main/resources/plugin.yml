@@ -1,6 +1,6 @@
 name: QuestEngine
 main: com.gmail.bobason01.questengine.QuestEnginePlugin
-version: 1.0
+version: 3.0
 api-version: 1.18
 author: crston
 softdepend:

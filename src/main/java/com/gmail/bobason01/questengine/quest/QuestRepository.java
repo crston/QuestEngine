@@ -1,105 +1,199 @@
 package com.gmail.bobason01.questengine.quest;
 
 import com.gmail.bobason01.questengine.QuestEnginePlugin;
-import java.io.File;
+
+import java.io.*;
+import java.net.JarURLConnection;
+import java.net.URL;
+import java.nio.file.Files;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.jar.JarEntry;
+import java.util.jar.JarFile;
 
 /**
  * QuestRepository
- * - 모든 퀘스트 정의를 로드 및 캐시
- * - 이벤트별 퀘스트 인덱스 자동 유지
- * - GC·I/O 오버헤드 최소화
+ * - YAML 퀘스트 파일을 전부 로드 및 캐시
+ * - 이벤트별 인덱스 O(1) 조회
+ * - jar 내부 quests 폴더도 자동 추출
+ * - 완전 불변 구조 유지로 GC 부담 최소화
  */
 public final class QuestRepository {
 
     private final QuestEnginePlugin plugin;
     private final File folder;
 
-    // 퀘스트 ID → 퀘스트 정의
-    private final Map<String, QuestDef> quests = new LinkedHashMap<>(128);
+    /** 퀘스트 ID → 정의 */
+    private volatile Map<String, QuestDef> quests = Map.of();
 
-    // 이벤트 이름 → 퀘스트 목록 (캐시)
-    private final Map<String, List<QuestDef>> byEvent = new ConcurrentHashMap<>();
+    /** 이벤트 이름 → 퀘스트 배열 (GC-free 접근) */
+    private volatile Map<String, QuestDef[]> byEvent = Map.of();
 
     public QuestRepository(QuestEnginePlugin plugin, String folderName) {
         this.plugin = plugin;
         this.folder = new File(plugin.getDataFolder(), folderName);
         if (!folder.exists()) folder.mkdirs();
-        loadAll();
+        reload();
     }
 
-    // ------------------------------------------------------------
-    // 퀘스트 로드 / 리로드
-    // ------------------------------------------------------------
-    private void loadAll() {
-        final File[] files = folder.listFiles((dir, name) -> name.endsWith(".yml"));
+    // =============================================================
+    // 리로드 (외부 + JAR 내부 quests 폴더 모두)
+    // =============================================================
+
+    public synchronized void reload() {
+        long start = System.nanoTime();
+
+        // jar 내부 기본 퀘스트 자동 추출
+        extractBundledQuests();
+
+        File[] files = folder.listFiles((dir, name) -> name.endsWith(".yml"));
         if (files == null || files.length == 0) {
-            plugin.getLogger().info("[QuestEngine] No quests found in " + folder.getName());
+            quests = Map.of();
+            byEvent = Map.of();
+            plugin.getLogger().warning("[QuestEngine] No quests found in " + folder.getPath());
             return;
         }
 
-        int loaded = 0;
+        Map<String, QuestDef> tmpQuests = new HashMap<>(Math.max(16, files.length));
+        Map<String, List<QuestDef>> tmpByEvent = new HashMap<>(128);
+
         for (File f : files) {
             try {
-                QuestDef q = QuestLoader.load(f);
+                QuestDef q = QuestDef.load(f);
                 if (q == null) continue;
 
-                String key = q.id.toLowerCase(Locale.ROOT).intern();
-                quests.put(key, q);
-
-                if (!q.event.isEmpty()) {
-                    String evKey = q.event.toLowerCase(Locale.ROOT).intern();
-                    byEvent.computeIfAbsent(evKey, k -> new ArrayList<>()).add(q);
+                String idKey = safeLower(q.id);
+                if (idKey == null || idKey.isEmpty()) {
+                    plugin.getLogger().warning("[QuestEngine] Quest file missing id: " + f.getName());
+                    continue;
                 }
+                tmpQuests.put(idKey, q);
 
-                loaded++;
+                String evKey = safeLower(q.event);
+                if (evKey == null || evKey.isEmpty()) evKey = "*";
+                tmpByEvent.computeIfAbsent(evKey, k -> new ArrayList<>()).add(q);
+
             } catch (Throwable t) {
-                plugin.getLogger().warning("[QuestEngine] Failed to load quest file: " + f.getName());
+                plugin.getLogger().warning("[QuestEngine] Failed to load " + f.getName() + ": " + t.getMessage());
             }
         }
 
-        plugin.getLogger().info("[QuestEngine] Loaded " + loaded + " quests from " + folder.getName());
+        // List → Array 변환 (고정 배열 접근)
+        Map<String, QuestDef[]> eventMap = new HashMap<>(tmpByEvent.size());
+        for (Map.Entry<String, List<QuestDef>> e : tmpByEvent.entrySet()) {
+            eventMap.put(e.getKey(), e.getValue().toArray(QuestDef[]::new));
+        }
+
+        quests = Map.copyOf(tmpQuests);
+        byEvent = Map.copyOf(eventMap);
+
+        long took = (System.nanoTime() - start) / 1_000_000L;
+        plugin.getLogger().info("[QuestEngine] Loaded " + quests.size() + " quests (" + took + "ms)");
     }
 
-    /**
-     * 특정 ID로 퀘스트 조회
-     */
+    // =============================================================
+    // 이벤트 캐시 재구성 (디스크 접근 없음)
+    // =============================================================
+
+    public synchronized void rebuildEventMap() {
+        Map<String, List<QuestDef>> tmpByEvent = new HashMap<>(128);
+        for (QuestDef q : quests.values()) {
+            if (q == null) continue;
+            String evKey = safeLower(q.event);
+            if (evKey == null || evKey.isEmpty()) evKey = "*";
+            tmpByEvent.computeIfAbsent(evKey, k -> new ArrayList<>()).add(q);
+        }
+
+        Map<String, QuestDef[]> eventMap = new HashMap<>(tmpByEvent.size());
+        for (Map.Entry<String, List<QuestDef>> e : tmpByEvent.entrySet()) {
+            eventMap.put(e.getKey(), e.getValue().toArray(QuestDef[]::new));
+        }
+
+        byEvent = Map.copyOf(eventMap);
+    }
+
+    // =============================================================
+    // 조회 메서드
+    // =============================================================
+
     public QuestDef get(String id) {
         if (id == null) return null;
         return quests.get(id.toLowerCase(Locale.ROOT));
     }
 
-    /**
-     * 특정 이벤트 이름으로 퀘스트 목록 조회
-     * - 미리 인덱싱된 캐시 구조로 O(1)
-     */
-    public List<QuestDef> byEvent(String eventName) {
-        if (eventName == null || eventName.isEmpty()) return Collections.emptyList();
-        return byEvent.getOrDefault(eventName.toLowerCase(Locale.ROOT), Collections.emptyList());
+    public QuestDef[] byEvent(String eventName) {
+        if (eventName == null || eventName.isEmpty()) return new QuestDef[0];
+        return byEvent.getOrDefault(eventName.toLowerCase(Locale.ROOT), new QuestDef[0]);
     }
 
-    /**
-     * 모든 퀘스트 ID 반환
-     */
     public Set<String> ids() {
-        return Collections.unmodifiableSet(quests.keySet());
+        return quests.keySet();
     }
 
     /**
-     * 변경된 파일만 다시 로드 (성능 개선)
+     * 전체 퀘스트 컬렉션 반환 (GUI / 디버그 / 명령어용)
+     * Map.copyOf 기반으로 GC 안전한 불변 컬렉션 제공.
      */
-    public void reload() {
-        plugin.getLogger().info("[QuestEngine] Reloading quests...");
-        quests.clear();
-        byEvent.clear();
-        loadAll();
+    public Collection<QuestDef> all() {
+        return Collections.unmodifiableCollection(quests.values());
     }
 
-    /**
-     * 현재 로드된 퀘스트 수
-     */
     public int size() {
         return quests.size();
+    }
+
+    // =============================================================
+    // 내부 유틸
+    // =============================================================
+
+    private String safeLower(String s) {
+        return s == null ? null : s.toLowerCase(Locale.ROOT);
+    }
+
+    // =============================================================
+    // jar 내부 quests/ 자동 추출 (getFile() 사용하지 않음)
+    // =============================================================
+
+    private void extractBundledQuests() {
+        try {
+            URL res = plugin.getClass().getClassLoader().getResource("quests/");
+            if (res == null) return;
+
+            if ("jar".equals(res.getProtocol())) {
+                JarURLConnection conn = (JarURLConnection) res.openConnection();
+                try (JarFile jar = conn.getJarFile()) {
+                    Enumeration<JarEntry> entries = jar.entries();
+                    while (entries.hasMoreElements()) {
+                        JarEntry e = entries.nextElement();
+                        if (e.isDirectory()) continue;
+                        String name = e.getName();
+                        if (!name.startsWith("quests/") || !name.endsWith(".yml")) continue;
+
+                        String fileName = name.substring("quests/".length());
+                        File out = new File(folder, fileName);
+                        if (out.exists()) continue;
+
+                        out.getParentFile().mkdirs();
+                        try (InputStream in = jar.getInputStream(e);
+                             OutputStream os = Files.newOutputStream(out.toPath())) {
+                            in.transferTo(os);
+                        } catch (Throwable ex) {
+                            plugin.getLogger().warning("[QuestEngine] Failed to extract quest " + name + ": " + ex.getMessage());
+                        }
+                    }
+                }
+            } else if ("file".equals(res.getProtocol())) {
+                // 개발 환경용 (resources 폴더가 파일 시스템일 때)
+                File dir = new File(res.toURI());
+                File[] list = dir.listFiles((d, n) -> n.endsWith(".yml"));
+                if (list == null) return;
+                for (File f : list) {
+                    File out = new File(folder, f.getName());
+                    if (!out.exists()) Files.copy(f.toPath(), out.toPath());
+                }
+            }
+
+        } catch (Throwable t) {
+            plugin.getLogger().warning("[QuestEngine] Failed to extract internal quests: " + t.getMessage());
+        }
     }
 }

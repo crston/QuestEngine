@@ -2,7 +2,6 @@ package com.gmail.bobason01.questengine.runtime;
 
 import me.clip.placeholderapi.PlaceholderAPI;
 import org.bukkit.Bukkit;
-import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.event.Event;
 import org.bukkit.event.block.BlockBreakEvent;
@@ -11,22 +10,20 @@ import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.inventory.CraftItemEvent;
 import org.bukkit.event.player.PlayerFishEvent;
 
+import java.lang.reflect.Method;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * ConditionEvaluator
- * - 퀘스트 조건문 평가기
- * - PAPI, 내부 변수, 이벤트 기반 변수 모두 지원
- * - 캐시 기반 파싱 및 분기 최적화
+ * ConditionEvaluator (개선 버전)
+ * - 문자열, 숫자, 리플렉션(event.*) 접근, PAPI, ctx 모두 지원
+ * - 자동 trim, 따옴표 제거, 공백 안전 처리
+ * - Bukkit / Paper 완전 호환
  */
 public final class ConditionEvaluator {
 
     private ConditionEvaluator() {}
 
-    // ------------------------------------------------------------
-    // 캐시 및 상수
-    // ------------------------------------------------------------
     private static final boolean PAPI = Bukkit.getPluginManager().getPlugin("PlaceholderAPI") != null;
     private static final Map<String, Parsed> CACHE = new ConcurrentHashMap<>(512);
 
@@ -35,7 +32,7 @@ public final class ConditionEvaluator {
     private static final Set<String> OPS = Set.of("==", "!=", ">=", "<=", ">", "<");
 
     // ------------------------------------------------------------
-    // 메인 평가 진입점
+    // 메인 평가
     // ------------------------------------------------------------
     public static boolean eval(Player p, Event e, Map<String, Object> ctx, String expr) {
         if (expr == null || expr.isEmpty()) return false;
@@ -46,6 +43,10 @@ public final class ConditionEvaluator {
         String lv = resolve(p, e, ctx, parsed.left);
         String rv = stripQuotes(parsed.right);
 
+        if (lv == null || rv == null) return false;
+        lv = lv.trim();
+        rv = rv.trim();
+
         Double ln = toNum(lv);
         Double rn = toNum(rv);
         if (ln != null && rn != null)
@@ -55,7 +56,7 @@ public final class ConditionEvaluator {
     }
 
     // ------------------------------------------------------------
-    // 파싱 캐시
+    // 식 파서
     // ------------------------------------------------------------
     private static Parsed parse(String s) {
         for (String op : OPS) {
@@ -73,6 +74,8 @@ public final class ConditionEvaluator {
     // 문자열 처리
     // ------------------------------------------------------------
     private static String stripQuotes(String s) {
+        if (s == null) return "";
+        s = s.trim();
         int len = s.length();
         if (len >= 2) {
             char first = s.charAt(0), last = s.charAt(len - 1);
@@ -120,35 +123,73 @@ public final class ConditionEvaluator {
     }
 
     // ------------------------------------------------------------
-    // 값 해석기 (context / builtin / papi)
+    // 값 해석
     // ------------------------------------------------------------
     private static String resolve(Player p, Event e, Map<String, Object> ctx, String token) {
         String t = token.trim();
 
-        if (!t.startsWith("%") || !t.endsWith("%"))
-            return t; // 리터럴 값
+        // 1. 점 표기법(event.xxx) 지원
+        if (t.startsWith("event.")) {
+            Object val = reflectChain(e, t.substring("event.".length()));
+            return val == null ? "" : String.valueOf(val);
+        }
 
-        String key = t.substring(1, t.length() - 1);
-
-        // context 우선
-        if (ctx != null) {
-            Object v = ctx.get(key);
+        // 2. ctx 우선
+        if (ctx != null && ctx.containsKey(t)) {
+            Object v = ctx.get(t);
             if (v != null) return String.valueOf(v);
         }
 
-        // built-in fast path
-        String builtin = builtin(p, e, key);
+        // 3. %placeholder% 형태
+        if (t.startsWith("%") && t.endsWith("%")) {
+            String key = t.substring(1, t.length() - 1);
+
+            // ctx에서 찾기
+            if (ctx != null) {
+                Object v = ctx.get(key);
+                if (v != null) return String.valueOf(v);
+            }
+
+            // 내장 변수
+            String builtin = builtin(p, e, key);
+            if (builtin != null) return builtin;
+
+            // PlaceholderAPI
+            if (PAPI)
+                return PlaceholderAPI.setPlaceholders(p, "%" + key + "%");
+
+            return "";
+        }
+
+        // 4. 기본 literal
+        String builtin = builtin(p, e, t);
         if (builtin != null) return builtin;
 
-        // PlaceholderAPI fallback
-        if (PAPI)
-            return PlaceholderAPI.setPlaceholders(p, "%" + key + "%");
-
-        return "";
+        return t;
     }
 
     // ------------------------------------------------------------
-    // 내장 변수 해석 (성능 위주, if-chain 제거)
+    // event 필드 체인 접근기 (리플렉션)
+    // ------------------------------------------------------------
+    private static Object reflectChain(Object base, String chain) {
+        if (base == null || chain == null || chain.isEmpty()) return null;
+        Object cur = base;
+        String[] parts = chain.split("\\.");
+        try {
+            for (String mName : parts) {
+                String getter = "get" + Character.toUpperCase(mName.charAt(0)) + mName.substring(1);
+                Method m = cur.getClass().getMethod(getter);
+                cur = m.invoke(cur);
+                if (cur == null) return null;
+            }
+            return cur;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    // ------------------------------------------------------------
+    // 내장 변수
     // ------------------------------------------------------------
     private static String builtin(Player p, Event e, String key) {
         return switch (key) {

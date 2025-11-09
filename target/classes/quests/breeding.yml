@@ -1,0 +1,16 @@
+name: "Ranch Owner"
+id: breeding
+event: BREEDING
+amount: 3
+points: 3
+
+display:
+  title: "&2Ranch Owner"
+  description:
+    - "&7Breed animals 3 times."
+  reward: "&aReward: 10 Wheat"
+
+actions:
+  success:
+    - msg{t="&aRanch Owner reward granted!"} @self
+    - command{c="give %player% wheat 10"} @server

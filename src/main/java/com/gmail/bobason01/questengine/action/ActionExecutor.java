@@ -19,11 +19,12 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * ActionExecutor
- * 고성능 실행기
- * - 문자열 파싱 최소화
- * - MethodHandle 기반 리플렉션 호출 캐시
- * - 스케줄러 호출 최소화
- * - PlaceholderAPI는 조건부 호출
+ * 고성능 퀘스트 액션 실행기
+ * - 색상 코드(& → §) 자동 지원
+ * - PlaceholderAPI 조건부 적용
+ * - MMOItems / ItemsAdder 지원
+ * - 딜레이 기반 액션 순차 실행
+ * - 캐시 기반 성능 최적화
  */
 public final class ActionExecutor {
 
@@ -73,6 +74,7 @@ public final class ActionExecutor {
         initHooks();
     }
 
+    /** MMOItems / ItemsAdder 리플렉션 초기화 */
     private void initHooks() {
         MethodHandles.Lookup lookup = MethodHandles.lookup();
         if (mmo) {
@@ -147,13 +149,14 @@ public final class ActionExecutor {
         return out;
     }
 
+    /** 실행 */
     private void runEntries(List<ActionEntry> entries, QuestDef q, Player p) {
         if (entries.isEmpty()) return;
         final int[] idx = {0};
         scheduleNext(entries, idx, 0L, q, p);
     }
 
-    /** 동일한 지연 구간을 묶어 스케줄 */
+    /** 딜레이 기반 순차 실행 스케줄링 */
     private void scheduleNext(List<ActionEntry> entries, int[] idx, long prevDelay, QuestDef q, Player p) {
         if (idx[0] >= entries.size()) return;
         ActionEntry current = entries.get(idx[0]);
@@ -169,33 +172,72 @@ public final class ActionExecutor {
         }, delta);
     }
 
+    /** 액션 실행 본체 */
     private void execute(ActionEntry e, QuestDef q, Player p) {
         switch (e.type) {
-            case DELAY -> { /* no-op */ }
+            case DELAY -> {
+                // no-op
+            }
             case MESSAGE -> {
                 String txt = applyPlaceholders(p, e.value, q);
+                if (txt.isEmpty()) return;
+
+                // 따옴표 자동 제거
+                if ((txt.startsWith("\"") && txt.endsWith("\"")) || (txt.startsWith("'") && txt.endsWith("'"))) {
+                    txt = txt.substring(1, txt.length() - 1);
+                }
+
+                // 색상 코드 변환
                 txt = ChatColor.translateAlternateColorCodes('&', txt);
-                if (e.target == Target.SELF) p.sendMessage(txt);
-                else {
+
+                if (e.target == Target.SELF) {
+                    p.sendMessage(txt);
+                } else {
                     String finalTxt = txt;
                     Bukkit.getOnlinePlayers().forEach(pl -> pl.sendMessage(finalTxt));
                 }
             }
             case COMMAND -> {
                 String cmd = applyPlaceholders(p, e.value, q);
-                if (e.target == Target.SELF) p.performCommand(cmd);
-                else Bukkit.dispatchCommand(Bukkit.getConsoleSender(), cmd);
+                if (cmd == null || cmd.trim().isEmpty()) {
+                    plugin.getLogger().warning("[QuestEngine] Skipped empty command in quest '" + q.id + "'");
+                    return;
+                }
+                cmd = cmd.trim();
+
+                try {
+                    if (e.target == Target.SELF) {
+                        p.performCommand(cmd);
+                    } else {
+                        Bukkit.dispatchCommand(Bukkit.getConsoleSender(), cmd);
+                    }
+                } catch (Throwable ex) {
+                    plugin.getLogger().warning("[QuestEngine] Failed to execute command: " + cmd);
+                    ex.printStackTrace();
+                }
             }
             case ITEM -> {
+                if (e.value == null || e.value.isEmpty()) {
+                    plugin.getLogger().warning("[QuestEngine] Empty item id in quest '" + q.id + "'");
+                    return;
+                }
                 ItemStack is = createItemFast(e.value, e.amount);
-                if (is != null) p.getInventory().addItem(is);
+                if (is != null) {
+                    p.getInventory().addItem(is);
+                } else {
+                    plugin.getLogger().warning("[QuestEngine] Unknown item id '" + e.value + "' in quest '" + q.id + "'");
+                }
             }
         }
     }
 
+    /** PlaceholderAPI 및 변환 적용 */
     private String applyPlaceholders(Player p, String text, QuestDef q) {
         if (text == null || text.isEmpty()) return "";
-        String result = text.replace("%player%", p.getName()).replace("%quest_name%", q.name);
+        String result = text
+                .replace("%player%", p.getName())
+                .replace("%quest_name%", q.name);
+
         if (papi && result.contains("%")) {
             try { result = PlaceholderAPI.setPlaceholders(p, result); } catch (Throwable ignored) {}
         }

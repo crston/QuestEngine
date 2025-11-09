@@ -9,8 +9,8 @@ import java.util.*;
 /**
  * QuestLoader
  * - QuestDef 로딩 전용 클래스
+ * - targets 리스트 구조 대응
  * - 파일 접근 최소화 및 객체 생성 최적화
- * - TPS-friendly: 1000개 퀘스트 로드 시 0.2초 이내
  */
 public final class QuestLoader {
 
@@ -23,7 +23,18 @@ public final class QuestLoader {
         final String id = stripExt(file.getName()).toLowerCase(Locale.ROOT);
         final String name = cfg.getString("name", id);
         final String event = cfg.getString("event", "none");
-        final String target = cfg.getString("target", "");
+
+        // target / targets 처리
+        final List<String> targets = new ArrayList<>();
+        if (cfg.contains("targets")) {
+            for (String s : cfg.getStringList("targets")) {
+                if (s != null && !s.isBlank()) targets.add(s.trim());
+            }
+        } else if (cfg.contains("target")) {
+            String single = cfg.getString("target", "").trim();
+            if (!single.isEmpty()) targets.add(single);
+        }
+
         final int amount = cfg.getInt("amount", 1);
         final int repeat = cfg.getInt("repeat", 1);
         final int points = cfg.getInt("points", 0);
@@ -52,12 +63,14 @@ public final class QuestLoader {
         // Actions
         final Map<String, List<String>> actions = readActions(cfg.getConfigurationSection("actions"));
 
-        // cfg 참조 제거 → GC 조기 대상화
+        // cfg 참조 제거 > GC 조기 대상화
         cfg.options().copyDefaults(false);
 
+        // target > targets 로 통합
         return new QuestDef(
-                id, name, event, target, amount, repeat, points, isPublic, party,
-                type, reset, display, custom, condSuccess, condFail, actions
+                id, name, event, targets, amount, repeat, points,
+                isPublic, party, type, reset, display, custom,
+                condSuccess, condFail, actions
         );
     }
 

@@ -1,0 +1,17 @@
+name: "Greeting Quest"
+id: hello_chat
+event: PLAYER_CHAT
+target: "hello"
+amount: 1
+points: 1
+
+display:
+  title: "&fGreeting Quest"
+  description:
+    - "&7Say 'hello' in the chat."
+  reward: "&aReward: 10 Coins"
+
+actions:
+  success:
+    - msg{t="&aYou greeted with 'hello'!"} @self
+    - command{c="eco give %player% 10"} @server

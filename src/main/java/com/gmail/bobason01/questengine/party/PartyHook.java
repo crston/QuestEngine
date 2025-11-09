@@ -11,8 +11,8 @@ import java.util.*;
 /**
  * PartyHook
  * - MMOCore, MythicDungeons, Parties 플러그인 자동 감지 및 통합
- * - 리플렉션 호출 전부 캐시화 (init() 1회만)
- * - GC-free, main-thread 성능 중심 설계
+ * - 최신 MMOCore (PlayerData) + 구버전 (MMOPlayerData) 모두 지원
+ * - 리플렉션 캐시화, 성능 최적화
  */
 public final class PartyHook {
 
@@ -21,7 +21,7 @@ public final class PartyHook {
 
     private PartyHook() {}
 
-    // --- 리플렉션 캐시용 ---
+    // --- 리플렉션 캐시 ---
     private static Method mythic_getParty, mythic_getMembers;
     private static Method mmo_get, mmo_getParty, mmo_getOnline;
     private static Method parties_getApi, parties_getPlayer, parties_getPid, parties_getOnline;
@@ -56,9 +56,6 @@ public final class PartyHook {
         return enabled && adapter.available();
     }
 
-    /**
-     * 특정 플레이어 기준 반경 내 파티 멤버 탐색
-     */
     public static Collection<Player> membersNear(Player p, int radius) {
         if (!enabled()) return Collections.singletonList(p);
         List<Player> out = new ArrayList<>(8);
@@ -111,15 +108,55 @@ public final class PartyHook {
     }
 
     // ==============================
-    // MMOCore
+    // MMOCore (신/구버전 자동 감지)
     // ==============================
     private static PartyAdapter mmoCore() {
         try {
-            Class<?> dataCls = Class.forName("net.Indyuce.mmocore.api.player.MMOPlayerData");
-            mmo_get = dataCls.getMethod("get", UUID.class);
-            mmo_getParty = dataCls.getMethod("getParty");
-            Class<?> partyCls = Class.forName("net.Indyuce.mmocore.party.Party");
+            Class<?> playerDataCls;
+            mmo_get = null;
+            String sig = "";
+
+            // PlayerData / MMOPlayerData 자동 탐색
+            try {
+                playerDataCls = Class.forName("net.Indyuce.mmocore.api.player.PlayerData");
+            } catch (ClassNotFoundException e) {
+                playerDataCls = Class.forName("net.Indyuce.mmocore.api.player.MMOPlayerData");
+            }
+
+            // 가능한 모든 get() 시그니처 시도 — 예외 전혀 던지지 않음
+            try {
+                mmo_get = playerDataCls.getMethod("get", Player.class);
+                sig = "Player";
+            } catch (Throwable ignored) {}
+            if (mmo_get == null) {
+                try {
+                    mmo_get = playerDataCls.getMethod("get", UUID.class);
+                    sig = "UUID";
+                } catch (Throwable ignored) {}
+            }
+            if (mmo_get == null) {
+                try {
+                    mmo_get = playerDataCls.getMethod("get", org.bukkit.OfflinePlayer.class);
+                    sig = "OfflinePlayer";
+                } catch (Throwable ignored) {}
+            }
+
+            if (mmo_get == null) {
+                Bukkit.getLogger().info("[QuestEngine] MMOCore hook skipped (no valid get() found)");
+                return PartyAdapter.EMPTY;
+            }
+
+            mmo_getParty = playerDataCls.getMethod("getParty");
+
+            Class<?> partyCls;
+            try {
+                partyCls = Class.forName("net.Indyuce.mmocore.party.provided.Party");
+            } catch (ClassNotFoundException e) {
+                partyCls = Class.forName("net.Indyuce.mmocore.party.Party");
+            }
             mmo_getOnline = partyCls.getMethod("getOnlineMembers");
+
+            Bukkit.getLogger().info("[QuestEngine] MMOCore hook successful (" + sig + " signature)");
 
             return new PartyAdapter() {
                 @Override
@@ -129,19 +166,33 @@ public final class PartyHook {
                 @Override
                 public Collection<Player> members(Player p) {
                     try {
-                        Object data = mmo_get.invoke(null, p.getUniqueId());
+                        Object data = null;
+                        // 다중 시그니처 안전 호출
+                        try { data = mmo_get.invoke(null, p); } catch (Throwable ignored) {}
+                        if (data == null) try { data = mmo_get.invoke(null, p.getUniqueId()); } catch (Throwable ignored) {}
                         if (data == null) return Collections.singletonList(p);
+
                         Object party = mmo_getParty.invoke(data);
                         if (party == null) return Collections.singletonList(p);
-                        Collection<Player> members = (Collection<Player>) mmo_getOnline.invoke(party);
-                        return (members == null || members.isEmpty()) ? Collections.singletonList(p) : members;
-                    } catch (Throwable t) {
+
+                        Collection<?> members = (Collection<?>) mmo_getOnline.invoke(party);
+                        List<Player> list = new ArrayList<>(members.size());
+                        for (Object o : members) {
+                            try {
+                                Method getPlayer = o.getClass().getMethod("getPlayer");
+                                Player pl = (Player) getPlayer.invoke(o);
+                                if (pl != null && pl.isOnline()) list.add(pl);
+                            } catch (Throwable ignored) {}
+                        }
+                        return list.isEmpty() ? Collections.singletonList(p) : list;
+                    } catch (Throwable ignored) {
                         return Collections.singletonList(p);
                     }
                 }
             };
-        } catch (Throwable t) {
-            Bukkit.getLogger().warning("[QuestEngine] MMOCore hook failed: " + t.getMessage());
+
+        } catch (Throwable ignored) {
+            Bukkit.getLogger().info("[QuestEngine] MMOCore not fully compatible, skipping hook");
             return PartyAdapter.EMPTY;
         }
     }

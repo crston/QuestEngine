@@ -3,25 +3,31 @@ package com.gmail.bobason01.questengine.runtime;
 import com.gmail.bobason01.questengine.QuestEnginePlugin;
 import com.gmail.bobason01.questengine.action.ActionExecutor;
 import com.gmail.bobason01.questengine.progress.ProgressRepository;
-import com.gmail.bobason01.questengine.quest.CustomEventData;
 import com.gmail.bobason01.questengine.quest.QuestDef;
 import com.gmail.bobason01.questengine.quest.QuestRepository;
 import com.gmail.bobason01.questengine.util.Msg;
 import org.bukkit.Bukkit;
-import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
 import org.bukkit.event.Event;
+import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.event.block.BlockPlaceEvent;
+import org.bukkit.event.entity.EntityDeathEvent;
+import org.bukkit.event.player.AsyncPlayerChatEvent;
+import org.bukkit.event.player.PlayerCommandPreprocessEvent;
 
 import java.lang.reflect.Method;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 
+/**
+ * Engine — QuestEngine 핵심 엔진 (극한 성능 버전)
+ * - 조건 캐시 / 이벤트 디듀프 / 리플렉션 캐시
+ * - 기본/동적 이벤트 처리, 커스텀 컨텍스트 처리
+ * - 일일 리셋 스케줄러, 내부 퀘스트 프리로드
+ * - 명령측에서 요구하는 전 API 제공
+ */
 public final class Engine {
 
     private final QuestEnginePlugin plugin;
@@ -29,49 +35,40 @@ public final class Engine {
     private final ProgressRepository progress;
     private final ActionExecutor actions;
     private final Msg msg;
-
     private final ExecutorService worker;
 
-    private final Map<String, List<QuestDef>> eventCache = new ConcurrentHashMap<>(128);
+    private final Map<String, BoolCacheEntry> conditionCache = new ConcurrentHashMap<>(1024);
+    private final Map<UUID, Object> playerLocks = new ConcurrentHashMap<>(256);
+    private final Map<UUID, Map<String, Long>> recentEventWindow = new ConcurrentHashMap<>(256);
     private final Map<String, Method> reflectCache = new ConcurrentHashMap<>(256);
+    private final Map<String, TargetMatcher> matchers = new ConcurrentHashMap<>(64);
+
+    private final long conditionTtlNanos;
+    private final long dedupWindowNanos;
 
     private static final class BoolCacheEntry {
         final boolean value;
         final long expireAt;
         BoolCacheEntry(boolean v, long e) { value = v; expireAt = e; }
     }
-    private final Map<String, BoolCacheEntry> conditionCache = new ConcurrentHashMap<>(1024);
-    private final long conditionTtlNanos;
 
-    private final Map<UUID, Object> playerLocks = new ConcurrentHashMap<>(256);
-    private final Map<UUID, Map<String, Long>> recentEventWindow = new ConcurrentHashMap<>(256);
-    private final long dedupWindowNanos;
+    @FunctionalInterface
+    private interface TargetMatcher {
+        boolean test(Player p, Event e, String target);
+    }
 
     public Engine(QuestEnginePlugin plugin,
                   QuestRepository quests,
                   ProgressRepository progress,
                   ActionExecutor actions,
-                  Msg msg) {
+                  Msg msg,
+                  ExecutorService worker) {
         this.plugin = plugin;
         this.quests = quests;
         this.progress = progress;
         this.actions = actions;
         this.msg = msg;
-
-        int cpus = Math.max(2, Runtime.getRuntime().availableProcessors());
-        this.worker = new ThreadPoolExecutor(
-                Math.max(4, cpus),
-                Math.max(8, cpus * 2),
-                30L, TimeUnit.SECONDS,
-                new LinkedBlockingQueue<>(4096),
-                r -> {
-                    Thread t = new Thread(r, "QuestEngine-Worker");
-                    t.setDaemon(true);
-                    t.setPriority(Thread.NORM_PRIORITY + 1);
-                    return t;
-                },
-                new ThreadPoolExecutor.DiscardOldestPolicy()
-        );
+        this.worker = worker;
 
         long ttlMs = Math.max(50, plugin.getConfig().getLong("performance.condition-cache-ttl-ms", 300));
         this.conditionTtlNanos = ttlMs * 1_000_000L;
@@ -79,32 +76,55 @@ public final class Engine {
         long dedupMs = Math.max(3, plugin.getConfig().getLong("performance.event-dedup-window-ms", 10));
         this.dedupWindowNanos = dedupMs * 1_000_000L;
 
-        cacheEvents();
+        installDefaultMatchers();
         scheduleDailyResets();
+        preloadInternalQuests();
     }
 
+    // =============================================================
+    // 공개 게터 (명령/외부에서 사용)
+    // =============================================================
     public QuestRepository quests() { return quests; }
     public ProgressRepository progress() { return progress; }
     public ActionExecutor actions() { return actions; }
     public Msg msg() { return msg; }
     public ExecutorService asyncPool() { return worker; }
 
-    public void refreshEventCache() { cacheEvents(); }
-
-    private void cacheEvents() {
-        Map<String, List<QuestDef>> tmp = new ConcurrentHashMap<>();
-        for (String id : quests.ids()) {
-            QuestDef q = quests.get(id);
-            if (q == null) continue;
-            if (q.event == null) continue;
-            String key = q.event.toLowerCase(Locale.ROOT);
-            tmp.computeIfAbsent(key, k -> new ArrayList<>()).add(q);
-        }
-        eventCache.clear();
-        eventCache.putAll(tmp);
+    // =============================================================
+    // 관리/유틸
+    // =============================================================
+    /** 이벤트 맵 리프레시 (리로드 후 호출) */
+    public void refreshEventCache() {
+        quests.reload();
+        quests.rebuildEventMap();
     }
 
+    /** 엔진 종료 */
+    public void shutdown() {
+        try { worker.shutdownNow(); } catch (Throwable ignored) {}
+        conditionCache.clear();
+        reflectCache.clear();
+        playerLocks.clear();
+        recentEventWindow.clear();
+    }
+
+    // =============================================================
+    // 퀘스트 수동 제어 (명령어에서 호출)
+    // =============================================================
+    /** /quest start <id> 형태 지원 */
+    public void startQuest(Player p, String questId) {
+        if (p == null || questId == null) return;
+        QuestDef q = quests.get(questId);
+        if (q == null) {
+            p.sendMessage(msg.pref("invalid_args"));
+            return;
+        }
+        startQuest(p, q);
+    }
+
+    /** 객체 기반 시작 */
     public void startQuest(Player p, QuestDef q) {
+        if (p == null || q == null) return;
         if (progress.isActive(p.getUniqueId(), p.getName(), q.id)) {
             p.sendMessage(msg.pref("quest_already_active"));
             return;
@@ -115,7 +135,16 @@ public final class Engine {
         p.sendMessage(msg.pref("quest_started").replace("%quest_name%", q.name));
     }
 
+    /** /quest cancel <id> 형태 지원 */
+    public void cancelQuest(Player p, String questId) {
+        if (p == null || questId == null) return;
+        QuestDef q = quests.get(questId);
+        cancelQuest(p, q);
+    }
+
+    /** 객체 기반 취소 */
     public void cancelQuest(Player p, QuestDef q) {
+        if (p == null || q == null) return;
         if (!progress.isActive(p.getUniqueId(), p.getName(), q.id)) {
             p.sendMessage(msg.pref("quest_not_active"));
             return;
@@ -125,88 +154,99 @@ public final class Engine {
         p.sendMessage(msg.pref("quest_canceled").replace("%quest_name%", q.name));
     }
 
-    public void stopQuest(Player p, QuestDef q) {
-        progress.cancel(p.getUniqueId(), p.getName(), q.id);
-        actions.runAll(q, "stop", p);
+    /** 관리자 강제 중단 (UUID/이름/ID) */
+    public void stopQuest(UUID uuid, String playerName, String questId) {
+        if (uuid == null || playerName == null || questId == null) return;
+        progress.cancel(uuid, playerName, questId);
+        Player p = Bukkit.getPlayer(uuid);
+        if (p != null && p.isOnline()) {
+            QuestDef q = quests.get(questId);
+            if (q != null) actions.runAll(q, "cancel", p);
+            p.sendMessage(msg.pref("quest_stopped").replace("%quest_name%", q != null ? q.name : questId));
+        }
     }
 
+    /** 관리자 강제 중단 (객체 기반) */
+    public void stopQuest(Player p, QuestDef q) {
+        if (p == null || q == null) return;
+        if (!progress.isActive(p.getUniqueId(), p.getName(), q.id)) return;
+        progress.cancel(p.getUniqueId(), p.getName(), q.id);
+        p.sendMessage(msg.pref("quest_stopped").replace("%quest_name%", q.name));
+    }
+
+    /** 관리자 강제 완료 (UUID/이름/ID) */
+    public void forceComplete(UUID uuid, String playerName, String questId) {
+        if (uuid == null || playerName == null || questId == null) return;
+        Player p = Bukkit.getPlayer(uuid);
+        QuestDef q = quests.get(questId);
+        int pts = (q != null ? q.points : 0);
+        progress.complete(uuid, playerName, questId, pts);
+        if (p != null && q != null) {
+            actions.runAll(q, "success", p);
+            p.sendMessage(msg.pref("quest_completed").replace("%quest_name%", q.name));
+        }
+    }
+
+    /** 관리자 강제 완료 (객체 기반) */
     public void forceComplete(Player p, QuestDef q) {
+        if (p == null || q == null) return;
         progress.complete(p.getUniqueId(), p.getName(), q.id, q.points);
         actions.runAll(q, "success", p);
+        p.sendMessage(msg.pref("quest_completed").replace("%quest_name%", q.name));
     }
 
+    /** 모든 퀘스트 포기 */
     public void abandonAll(Player p) {
+        if (p == null) return;
         progress.cancelAll(p.getUniqueId(), p.getName());
         p.sendMessage(msg.pref("abandon_all_done"));
     }
 
+    /** 진행 중 퀘스트 목록 출력 (progress bar 포함) */
     public void listActiveTo(Player p) {
-        List<String> active = progress.activeQuestIds(p.getUniqueId(), p.getName());
-        if (active.isEmpty()) {
-            p.sendMessage(msg.pref("list.empty"));
+        if (p == null) return;
+        List<String> active = progress.activeOf(p.getUniqueId(), p.getName());
+        if (active == null || active.isEmpty()) {
+            p.sendMessage(msg.pref("list_empty"));
             return;
         }
+        // 헤더 키는 messages.yml의 list_header 사용 (원 요청에서 active_quests_header 언급했어도 실제 키는 list_header)
+        p.sendMessage(msg.pref("list_header"));
 
-        p.sendMessage(msg.pref("list.header"));
-        String lineReward = msg.get("list.reward");     // ex) "§6보상 %reward%"
-        String lineProgress = msg.get("list.progress"); // ex) "§f진행도 %bar% §7(%percent%%)"
-        String lineTitle = msg.get("list.title");       // ex) "§e%title% §7(%value%/%target%)"
-        String lineDesc = msg.get("list.desc");         // ex) " §7- %desc%"
-
-        StringBuilder sb = new StringBuilder(256);
+        StringBuilder sb = new StringBuilder(64);
         for (String id : active) {
             QuestDef q = quests.get(id);
             if (q == null) continue;
 
             int val = progress.value(p.getUniqueId(), p.getName(), id);
-            double pct = q.amount <= 0 ? 1.0 : Math.min(1.0, val / (double) q.amount);
+            int target = Math.max(1, q.amount);
+            double pct = Math.min(1.0, Math.max(0.0, val / (double) target));
             int filled = (int) (pct * 20);
-            if (filled < 0) filled = 0;
-            if (filled > 20) filled = 20;
 
-            // progress bar 생성 (GC 최소화)
-            char[] green = new char[filled];
-            char[] gray = new char[20 - filled];
-            Arrays.fill(green, '■');
-            Arrays.fill(gray, '■');
-            String bar = "§a" + new String(green) + "§7" + new String(gray);
-
-            String title = q.display.title;
-            String reward = q.display.reward;
-
-            p.sendMessage(" ");
             sb.setLength(0);
-            p.sendMessage(lineTitle
-                    .replace("%title%", ChatColor.translateAlternateColorCodes('&', title))
-                    .replace("%value%", Integer.toString(val))
-                    .replace("%target%", Integer.toString(q.amount)));
+            sb.append("§f- §a").append(q.name).append(" §7(§e").append(val).append(" / ").append(target).append("§7) ");
+            sb.append("§a");
+            for (int i = 0; i < filled; i++) sb.append('■');
+            sb.append("§7");
+            for (int i = filled; i < 20; i++) sb.append('■');
 
-            for (int i = 0, size = q.display.description.size(); i < size; i++) {
-                String line = q.display.description.get(i);
-                p.sendMessage(lineDesc.replace("%desc%", ChatColor.translateAlternateColorCodes('&', line)));
-            }
-
-            p.sendMessage(lineProgress
-                    .replace("%bar%", bar)
-                    .replace("%percent%", Integer.toString((int) Math.round(pct * 100))));
-
-            p.sendMessage(lineReward.replace("%reward%", ChatColor.translateAlternateColorCodes('&', reward)));
+            p.sendMessage(sb.toString());
         }
     }
 
-
+    // =============================================================
+    // 이벤트 처리 (기본/커스텀/동적)
+    // =============================================================
+    /** 기본 이벤트 처리: repo의 event 키를 그대로 사용 */
     public void handle(Player p, String eventName, Event e) {
-        if (p == null) return;
-        if (eventName == null) return;
-
-        List<QuestDef> list = eventCache.get(eventName.toLowerCase(Locale.ROOT));
-        if (list == null || list.isEmpty()) return;
+        if (p == null || eventName == null) return;
+        QuestDef[] list = quests.byEvent(eventName);
+        if (list.length == 0) return;
 
         UUID uid = p.getUniqueId();
         if (isDedup(uid, eventName)) return;
 
         Object lock = playerLocks.computeIfAbsent(uid, k -> new Object());
-
         worker.execute(() -> {
             synchronized (lock) {
                 processEventInternal(p, eventName, e, list);
@@ -214,23 +254,124 @@ public final class Engine {
         });
     }
 
-    private void processEventInternal(Player p, String eventName, Event e, List<QuestDef> list) {
+    /** 컨텍스트 맵 기반 커스텀 이벤트 처리 */
+    public void handleCustom(Player p, String eventKey, Map<String, Object> ctx) {
+        if (p == null || eventKey == null) return;
+        QuestDef[] list = quests.byEvent(eventKey);
+        if (list.length == 0) return;
+
+        UUID uid = p.getUniqueId();
+        if (isDedup(uid, eventKey)) return;
+
+        Object lock = playerLocks.computeIfAbsent(uid, k -> new Object());
+        worker.execute(() -> {
+            synchronized (lock) {
+                processCustomInternal(p, list, ctx);
+            }
+        });
+    }
+
+    /** 값 하나만 빠르게 전달하는 동적 핸들러(간이) */
+    public void handleDynamic(Player p, String key, Object val) {
+        if (p == null || key == null) return;
+        Map<String, Object> ctx = new HashMap<>();
+        if (val != null) ctx.put("value", val);
+        handleCustom(p, key, ctx);
+    }
+
+    /** 리스너가 어떤 Bukkit Event든 넘겨주면 자동 매핑 처리 */
+    public void handleDynamic(Event e) {
+        if (e == null) return;
+
+        Player target = EventContextMapper.extractPlayer(e);
+        if (target == null) return;
+
+        String eventKey = e.getClass().getSimpleName().toUpperCase(Locale.ROOT);
+        QuestDef[] list = quests.byEvent(eventKey);
+        if (list.length == 0) return;
+
+        UUID uid = target.getUniqueId();
+        if (isDedup(uid, eventKey)) return;
+
+        Object lock = playerLocks.computeIfAbsent(uid, k -> new Object());
+        worker.execute(() -> {
+            synchronized (lock) {
+                Map<String, Object> ctx = EventContextMapper.map(e);
+                List<Runnable> pending = new ArrayList<>(4);
+
+                for (QuestDef q : list) {
+                    if (q == null) continue;
+                    if (!progress.isActive(uid, target.getName(), q.id)) continue;
+
+                    boolean fail = false;
+                    for (String cond : q.condFail) {
+                        if (cachedEval(target, e, ctx, cond)) { fail = true; break; }
+                    }
+                    if (fail) {
+                        final String qid = q.id;
+                        pending.add(() -> {
+                            actions.runAll(q, "fail", target);
+                            progress.cancel(uid, target.getName(), qid);
+                        });
+                        continue;
+                    }
+
+                    boolean ok = true;
+                    for (String cond : q.condSuccess) {
+                        if (!cachedEval(target, e, ctx, cond)) { ok = false; break; }
+                    }
+                    if (!ok) continue;
+
+                    int val = progress.addProgress(uid, target.getName(), q.id, 1);
+                    if (val >= q.amount) {
+                        pending.add(() -> {
+                            actions.runAll(q, "success", target);
+                            progress.complete(uid, target.getName(), q.id, q.points);
+                            if (q.repeat < 0) {
+                                progress.start(uid, target.getName(), q.id);
+                                actions.runAll(q, "restart", target);
+                                actions.runAll(q, "repeat", target);
+                            }
+                        });
+                    }
+                }
+
+                if (!pending.isEmpty()) {
+                    Bukkit.getScheduler().runTask(plugin, () -> {
+                        for (Runnable r : pending) {
+                            try { r.run(); } catch (Throwable ignored) {}
+                        }
+                    });
+                }
+            }
+        });
+    }
+
+    // =============================================================
+    // 내부 처리 공통
+    // =============================================================
+    private void processEventInternal(Player p, String eventName, Event e, QuestDef[] list) {
         UUID uid = p.getUniqueId();
         String name = p.getName();
+        TargetMatcher matcher = matchers.get(eventName.toLowerCase(Locale.ROOT));
+        if (matcher == null) matcher = matchers.getOrDefault("*", (pp, ee, t) -> true);
 
         List<Runnable> pending = new ArrayList<>(4);
-
-        for (int i = 0; i < list.size(); i++) {
-            QuestDef q = list.get(i);
+        for (QuestDef q : list) {
             if (q == null) continue;
             if (!progress.isActive(uid, name, q.id)) continue;
 
-            boolean fail = false;
-            if (q.condFail != null && !q.condFail.isEmpty()) {
-                for (int k = 0; k < q.condFail.size(); k++) {
-                    String cond = q.condFail.get(k);
-                    if (cachedEval(p, e, null, cond)) { fail = true; break; }
+            boolean matched = !q.hasTarget();
+            if (!matched) {
+                for (String t : q.targets) {
+                    if (matcher.test(p, e, t)) { matched = true; break; }
                 }
+            }
+            if (!matched) continue;
+
+            boolean fail = false;
+            for (String cond : q.condFail) {
+                if (cachedEval(p, e, null, cond)) { fail = true; break; }
             }
             if (fail) {
                 final String qid = q.id;
@@ -242,11 +383,8 @@ public final class Engine {
             }
 
             boolean ok = true;
-            if (q.condSuccess != null && !q.condSuccess.isEmpty()) {
-                for (int k = 0; k < q.condSuccess.size(); k++) {
-                    String cond = q.condSuccess.get(k);
-                    if (!cachedEval(p, e, null, cond)) { ok = false; break; }
-                }
+            for (String cond : q.condSuccess) {
+                if (!cachedEval(p, e, null, cond)) { ok = false; break; }
             }
             if (!ok) continue;
 
@@ -266,49 +404,25 @@ public final class Engine {
 
         if (!pending.isEmpty()) {
             Bukkit.getScheduler().runTask(plugin, () -> {
-                for (int i = 0; i < pending.size(); i++) {
-                    try { pending.get(i).run(); } catch (Throwable ignored) {}
+                for (Runnable r : pending) {
+                    try { r.run(); } catch (Throwable ignored) {}
                 }
             });
         }
     }
 
-    public void handleCustom(Player p, String eventKey, Map<String, Object> ctx) {
-        if (p == null) return;
-        if (eventKey == null) return;
-
-        List<QuestDef> list = eventCache.get(eventKey.toLowerCase(Locale.ROOT));
-        if (list == null || list.isEmpty()) return;
-
-        UUID uid = p.getUniqueId();
-        if (isDedup(uid, eventKey)) return;
-
-        Object lock = playerLocks.computeIfAbsent(uid, k -> new Object());
-
-        worker.execute(() -> {
-            synchronized (lock) {
-                processCustomInternal(p, list, ctx);
-            }
-        });
-    }
-
-    private void processCustomInternal(Player p, List<QuestDef> list, Map<String, Object> ctx) {
+    private void processCustomInternal(Player p, QuestDef[] list, Map<String, Object> ctx) {
         UUID uid = p.getUniqueId();
         String name = p.getName();
-
         List<Runnable> pending = new ArrayList<>(4);
 
-        for (int i = 0; i < list.size(); i++) {
-            QuestDef q = list.get(i);
+        for (QuestDef q : list) {
             if (q == null) continue;
             if (!progress.isActive(uid, name, q.id)) continue;
 
             boolean fail = false;
-            if (q.condFail != null && !q.condFail.isEmpty()) {
-                for (int k = 0; k < q.condFail.size(); k++) {
-                    String cond = q.condFail.get(k);
-                    if (cachedEval(p, null, ctx, cond)) { fail = true; break; }
-                }
+            for (String cond : q.condFail) {
+                if (cachedEval(p, null, ctx, cond)) { fail = true; break; }
             }
             if (fail) {
                 final String qid = q.id;
@@ -320,11 +434,8 @@ public final class Engine {
             }
 
             boolean ok = true;
-            if (q.condSuccess != null && !q.condSuccess.isEmpty()) {
-                for (int k = 0; k < q.condSuccess.size(); k++) {
-                    String cond = q.condSuccess.get(k);
-                    if (!cachedEval(p, null, ctx, cond)) { ok = false; break; }
-                }
+            for (String cond : q.condSuccess) {
+                if (!cachedEval(p, null, ctx, cond)) { ok = false; break; }
             }
             if (!ok) continue;
 
@@ -341,128 +452,16 @@ public final class Engine {
 
         if (!pending.isEmpty()) {
             Bukkit.getScheduler().runTask(plugin, () -> {
-                for (int i = 0; i < pending.size(); i++) {
-                    try { pending.get(i).run(); } catch (Throwable ignored) {}
+                for (Runnable r : pending) {
+                    try { r.run(); } catch (Throwable ignored) {}
                 }
             });
         }
     }
 
-    public void handleDynamic(Event e) {
-        if (e == null) return;
-
-        List<Runnable> pending = Collections.synchronizedList(new ArrayList<>(8));
-
-        worker.execute(() -> {
-            for (String id : quests.ids()) {
-                QuestDef q = quests.get(id);
-                if (q == null) continue;
-                if (!"custom".equalsIgnoreCase(q.type)) continue;
-                if (!"custom_event".equalsIgnoreCase(q.event)) continue;
-                if (q.custom == null) continue;
-
-                if (!isEventMatch(q.custom, e)) continue;
-
-                Player target = extractPlayer(e, q.custom.playerGetter);
-                if (target == null) continue;
-
-                UUID uid = target.getUniqueId();
-                String name = target.getName();
-
-                if (isDedup(uid, q.event)) continue;
-
-                Object lock = playerLocks.computeIfAbsent(uid, k -> new Object());
-                synchronized (lock) {
-
-                    if (!progress.isActive(uid, name, q.id)) continue;
-
-                    Map<String, Object> ctx = captureContext(e, q.custom);
-
-                    boolean fail = false;
-                    if (q.condFail != null && !q.condFail.isEmpty()) {
-                        for (int k = 0; k < q.condFail.size(); k++) {
-                            String cond = q.condFail.get(k);
-                            if (cachedEval(target, null, ctx, cond)) { fail = true; break; }
-                        }
-                    }
-                    if (fail) {
-                        final String qid = q.id;
-                        pending.add(() -> {
-                            actions.runAll(q, "fail", target);
-                            progress.cancel(uid, name, qid);
-                        });
-                        continue;
-                    }
-
-                    boolean ok = true;
-                    if (q.condSuccess != null && !q.condSuccess.isEmpty()) {
-                        for (int k = 0; k < q.condSuccess.size(); k++) {
-                            String cond = q.condSuccess.get(k);
-                            if (!cachedEval(target, null, ctx, cond)) { ok = false; break; }
-                        }
-                    }
-                    if (!ok) continue;
-
-                    pending.add(() -> {
-                        actions.runAll(q, "success", target);
-                        progress.complete(uid, name, q.id, q.points);
-                        if (q.repeat < 0) {
-                            progress.start(uid, name, q.id);
-                            actions.runAll(q, "restart", target);
-                            actions.runAll(q, "repeat", target);
-                        }
-                    });
-                }
-            }
-
-            if (!pending.isEmpty()) {
-                Bukkit.getScheduler().runTask(plugin, () -> {
-                    for (int i = 0; i < pending.size(); i++) {
-                        try { pending.get(i).run(); } catch (Throwable ignored) {}
-                    }
-                });
-            }
-        });
-    }
-
-    private boolean isEventMatch(CustomEventData custom, Event e) {
-        if (custom.eventClass == null || custom.eventClass.isEmpty()) return false;
-        try {
-            Class<?> cls = Class.forName(custom.eventClass);
-            return cls.isAssignableFrom(e.getClass());
-        } catch (Throwable t) {
-            return false;
-        }
-    }
-
-    private Player extractPlayer(Event e, String getterChain) {
-        Object cur = e;
-        String chain = getterChain == null || getterChain.isEmpty() ? "getPlayer()" : getterChain;
-        String[] parts = chain.replace("()", "").split("\\.");
-        try {
-            for (int i = 0; i < parts.length; i++) {
-                String m = parts[i];
-                Method md = cur.getClass().getMethod(m);
-                cur = md.invoke(cur);
-                if (cur == null) return null;
-            }
-            if (cur instanceof Player p) return p;
-        } catch (Throwable ignored) {}
-        return null;
-    }
-
-    private Map<String, Object> captureContext(Event e, CustomEventData custom) {
-        if (custom.captures == null || custom.captures.isEmpty()) return new HashMap<>(0);
-        Map<String, Object> ctx = new HashMap<>(Math.max(4, custom.captures.size()));
-        for (Map.Entry<String, String> en : custom.captures.entrySet()) {
-            String key = en.getKey();
-            String chain = en.getValue();
-            Object val = reflectChain(e, chain);
-            if (val != null) ctx.put(key, val);
-        }
-        return ctx;
-    }
-
+    // =============================================================
+    // 캐시/디듀프/매처 유틸
+    // =============================================================
     private boolean cachedEval(Player p, Event e, Map<String, Object> ctx, String expr) {
         if (expr == null || expr.isEmpty()) return true;
         String key = p.getUniqueId() + "|" + expr;
@@ -474,27 +473,6 @@ public final class Engine {
         return val;
     }
 
-    private Object reflectChain(Object base, String chain) {
-        if (base == null || chain == null || chain.isEmpty()) return null;
-        Object cur = base;
-        String[] parts = chain.replace("()", "").split("\\.");
-        try {
-            for (int i = 0; i < parts.length; i++) {
-                String mName = parts[i];
-                String cacheKey = cur.getClass().getName() + "#" + mName;
-                Object obj = cur;
-                Method m = reflectCache.computeIfAbsent(cacheKey, k -> {
-                    try { return obj.getClass().getMethod(mName); }
-                    catch (Throwable ex) { return null; }
-                });
-                if (m == null) return null;
-                cur = m.invoke(cur);
-                if (cur == null) return null;
-            }
-            return cur;
-        } catch (Throwable t) { return null; }
-    }
-
     private boolean isDedup(UUID uid, String key) {
         long now = System.nanoTime();
         Map<String, Long> m = recentEventWindow.computeIfAbsent(uid, k -> new ConcurrentHashMap<>(8));
@@ -504,16 +482,78 @@ public final class Engine {
         return false;
     }
 
+    private void installDefaultMatchers() {
+        matchers.put("*", (p, e, t) -> true);
+
+        matchers.put("block_break", (p, e, t) -> {
+            if (!(e instanceof BlockBreakEvent be)) return false;
+            if (t == null || t.isEmpty()) return true;
+            return tokenAnyMatch(be.getBlock().getType().name(), t);
+        });
+
+        matchers.put("block_place", (p, e, t) -> {
+            if (!(e instanceof BlockPlaceEvent bp)) return false;
+            if (t == null || t.isEmpty()) return true;
+            return tokenAnyMatch(bp.getBlockPlaced().getType().name(), t);
+        });
+
+        matchers.put("entity_kill", (p, e, t) -> {
+            if (!(e instanceof EntityDeathEvent de)) return false;
+            if (t == null || t.isEmpty()) return true;
+            return tokenAnyMatch(de.getEntity().getType().name(), t);
+        });
+
+        matchers.put("player_command", (p, e, t) -> {
+            if (!(e instanceof PlayerCommandPreprocessEvent ce)) return false;
+            if (t == null || t.isEmpty()) return true;
+            return ce.getMessage().toLowerCase(Locale.ROOT).startsWith("/" + t.toLowerCase(Locale.ROOT));
+        });
+
+        matchers.put("player_chat", (p, e, t) -> {
+            if (!(e instanceof AsyncPlayerChatEvent ce)) return false;
+            if (t == null || t.isEmpty()) return true;
+            return ce.getMessage().toLowerCase(Locale.ROOT).contains(t.toLowerCase(Locale.ROOT));
+        });
+    }
+
+    private static boolean tokenAnyMatch(String val, String target) {
+        String v = val.toUpperCase(Locale.ROOT);
+        for (String tok : target.split("\\|")) {
+            tok = tok.trim();
+            if (tok.isEmpty()) continue;
+            boolean neg = tok.charAt(0) == '!';
+            if (neg) tok = tok.substring(1).trim();
+            String up = tok.toUpperCase(Locale.ROOT);
+            boolean eq = v.equals(up);
+            if (neg && eq) return false;
+            if (!neg && eq) return true;
+        }
+        return false;
+    }
+
+    // =============================================================
+    // 프리로드/스케줄
+    // =============================================================
+    private void preloadInternalQuests() {
+        try {
+            if (plugin.getResource("quests") != null) {
+                plugin.getLogger().info("[QuestEngine] Loading internal quests from JAR");
+                quests.reload();
+            }
+        } catch (Throwable t) {
+            plugin.getLogger().warning("[QuestEngine] Internal quest load failed: " + t.getMessage());
+        }
+    }
+
     private void scheduleDailyResets() {
         Map<String, List<String>> timeToQuestIds = new HashMap<>();
         String defaultTime = plugin.getConfig().getString("reset.default-time", "04:00");
 
         for (String id : quests.ids()) {
             QuestDef q = quests.get(id);
-            if (q == null) continue;
-            if (q.reset == null) continue;
+            if (q == null || q.reset == null) continue;
             if (!"DAILY".equalsIgnoreCase(q.reset.policy)) continue;
-            String at = q.reset.time == null || q.reset.time.isBlank() ? defaultTime : q.reset.time;
+            String at = (q.reset.time == null || q.reset.time.isBlank()) ? defaultTime : q.reset.time;
             timeToQuestIds.computeIfAbsent(at, k -> new ArrayList<>()).add(id);
         }
 
@@ -521,7 +561,7 @@ public final class Engine {
             String time = e.getKey();
             long delayMs = millisUntil(time);
             long periodMs = 24L * 60L * 60L * 1000L;
-            List<String> ids = List.copyOf(e.getValue());
+            List<String> copy = List.copyOf(e.getValue());
 
             Bukkit.getScheduler().runTaskTimerAsynchronously(
                     plugin,
@@ -529,11 +569,9 @@ public final class Engine {
                         for (Player p : Bukkit.getOnlinePlayers()) {
                             UUID uid = p.getUniqueId();
                             String name = p.getName();
-                            for (int i = 0; i < ids.size(); i++) {
-                                progress.reset(uid, name, ids.get(i));
-                            }
+                            for (String qid : copy) progress.reset(uid, name, qid);
                         }
-                        plugin.getLogger().info("[QuestEngine] Daily reset done at " + time + " for " + ids.size() + " quests");
+                        plugin.getLogger().info("[QuestEngine] Daily reset done at " + time);
                     },
                     delayMs / 50,
                     periodMs / 50
@@ -543,8 +581,7 @@ public final class Engine {
 
     private long millisUntil(String hhmm) {
         String[] parts = hhmm.split(":");
-        int h = 0;
-        int m = 0;
+        int h = 0, m = 0;
         try {
             h = Integer.parseInt(parts[0]);
             if (parts.length > 1) m = Integer.parseInt(parts[1]);
@@ -553,14 +590,5 @@ public final class Engine {
         LocalDateTime next = now.withHour(h).withMinute(m).withSecond(0).withNano(0);
         if (!next.isAfter(now)) next = next.plusDays(1);
         return Duration.between(now, next).toMillis();
-    }
-
-    public void shutdown() {
-        try { worker.shutdownNow(); } catch (Throwable ignored) {}
-        conditionCache.clear();
-        eventCache.clear();
-        reflectCache.clear();
-        playerLocks.clear();
-        recentEventWindow.clear();
     }
 }

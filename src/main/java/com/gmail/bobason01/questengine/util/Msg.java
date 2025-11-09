@@ -7,14 +7,13 @@ import org.bukkit.configuration.file.YamlConfiguration;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Msg
- * - 고속 메시지 매니저 (다국어 지원 기반)
- * - I/O 최소화 및 캐싱 구조
- * - 실시간 리로드 안정
+ * - 색코드(&) 지원 + prefix 선택적
+ * - 캐싱 및 실시간 리로드 안정
  */
 public final class Msg {
 
@@ -23,8 +22,8 @@ public final class Msg {
     private volatile YamlConfiguration cfg;
     private volatile String prefix;
 
-    // 변환된 메시지 캐시 (Color + prefix 포함)
     private final Map<String, String> cache = new ConcurrentHashMap<>();
+    private final Map<String, List<String>> listCache = new ConcurrentHashMap<>();
 
     public Msg(QuestEnginePlugin plugin) {
         this.plugin = plugin;
@@ -35,16 +34,14 @@ public final class Msg {
                 plugin.saveResource("messages.yml", false);
             } catch (IllegalArgumentException ignored) {
                 try (Writer w = new OutputStreamWriter(new FileOutputStream(file), StandardCharsets.UTF_8)) {
-                    w.write("prefix: '&7[&aQuestEngine&7]'\n");
+                    w.write("prefix: '&7[&aQuestEngine&7] '\n");
                 } catch (IOException ignored2) {}
             }
         }
         reload();
     }
 
-    /**
-     * 메시지 파일 다시 로드 (핫리로드 안전)
-     */
+    /** 메시지 파일 다시 로드 */
     public synchronized void reload() {
         YamlConfiguration yml = new YamlConfiguration();
         try (InputStreamReader reader = new InputStreamReader(new FileInputStream(file), StandardCharsets.UTF_8)) {
@@ -56,34 +53,43 @@ public final class Msg {
         this.prefix = ChatColor.translateAlternateColorCodes('&',
                 yml.getString("prefix", "&7[&aQuestEngine&7] "));
         cache.clear();
+        listCache.clear();
     }
 
-    /**
-     * prefix + 메시지 (기본)
-     */
+    /** 리스트 메시지 (GUI용) */
+    public List<String> list(String path) {
+        return listCache.computeIfAbsent(path, p -> {
+            List<String> list = cfg.getStringList(p);
+            if (list != null && !list.isEmpty()) {
+                List<String> colored = new ArrayList<>(list.size());
+                for (String s : list)
+                    colored.add(applyColor(s));
+                return Collections.unmodifiableList(colored);
+            }
+            String single = cfg.getString(p);
+            if (single != null && !single.isEmpty()) {
+                return List.of(applyColor(single));
+            }
+            return List.of("§c<missing-list:" + p + ">");
+        });
+    }
+
+    /** prefix 없이 색 적용 */
     public String get(String key) {
-        return cache.computeIfAbsent(key, k ->
-                prefix + color(cfg.getString(k, k))
+        return cache.computeIfAbsent("get:" + key, k ->
+                applyColor(cfg.getString(key, key))
         );
     }
 
-    /**
-     * prefix 포함 버전 (get()과 동일, 호환용)
-     */
+    /** prefix 포함 */
     public String pref(String key) {
-        return get(key);
-    }
-
-    /**
-     * prefix 없는 원문
-     */
-    public String raw(String key) {
-        return cache.computeIfAbsent("raw:" + key, k ->
-                color(cfg.getString(key, key))
+        return cache.computeIfAbsent("pref:" + key, k ->
+                prefix + applyColor(cfg.getString(key, key))
         );
     }
 
-    private static String color(String s) {
+    /** 실제 색코드 변환 */
+    private static String applyColor(String s) {
         return ChatColor.translateAlternateColorCodes('&', s == null ? "" : s);
     }
 }
