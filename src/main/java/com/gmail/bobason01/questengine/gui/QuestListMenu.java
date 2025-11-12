@@ -21,6 +21,12 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+/**
+ * QuestListMenu
+ * - Shows player's active quests
+ * - Complete / Cancel system
+ * - Fully protected from item extraction or duplication
+ */
 public final class QuestListMenu implements Listener {
 
     private final QuestEnginePlugin plugin;
@@ -49,14 +55,11 @@ public final class QuestListMenu implements Listener {
 
     private void drawTopBar(Player p, Inventory inv) {
         String order = plugin.msg().get(getAsc(p) ? "gui.list.order_asc" : "gui.list.order_desc");
-        inv.setItem(0, icon(Material.OAK_SIGN,
-                plugin.msg().get("gui.list.search"),
+        inv.setItem(0, icon(Material.OAK_SIGN, plugin.msg().get("gui.list.search"),
                 List.of(plugin.msg().get("gui.list.search_lore"))));
-        inv.setItem(1, icon(Material.PLAYER_HEAD,
-                plugin.msg().get("gui.list.leaderboard"),
+        inv.setItem(1, icon(Material.PLAYER_HEAD, plugin.msg().get("gui.list.leaderboard"),
                 List.of(plugin.msg().get("gui.list.leaderboard_lore"))));
-        inv.setItem(2, icon(Material.BOOK,
-                plugin.msg().get("gui.list.public"),
+        inv.setItem(2, icon(Material.BOOK, plugin.msg().get("gui.list.public"),
                 List.of(plugin.msg().get("gui.list.public_lore"))));
         inv.setItem(8, icon(Material.COMPARATOR,
                 plugin.msg().get("gui.list.sort").replace("%order%", order),
@@ -64,13 +67,11 @@ public final class QuestListMenu implements Listener {
     }
 
     private void drawBottomBar(Inventory inv) {
-        inv.setItem(45, icon(Material.ARROW,
-                plugin.msg().get("gui.list.prev"), null));
+        inv.setItem(45, icon(Material.ARROW, plugin.msg().get("gui.list.prev"), null));
         inv.setItem(49, icon(Material.NAME_TAG,
                 plugin.msg().get("gui.list.page_input"),
                 List.of(plugin.msg().get("gui.list.page_input_lore"))));
-        inv.setItem(53, icon(Material.ARROW,
-                plugin.msg().get("gui.list.next"), null));
+        inv.setItem(53, icon(Material.ARROW, plugin.msg().get("gui.list.next"), null));
     }
 
     private void drawQuests(Player p, Inventory inv, int page) {
@@ -108,9 +109,7 @@ public final class QuestListMenu implements Listener {
 
             List<String> desc = descriptionOf(d);
             if (!desc.isEmpty()) {
-                for (String line : desc) {
-                    lore.add(ChatColor.translateAlternateColorCodes('&', "&7" + ChatColor.stripColor(line)));
-                }
+                for (String line : desc) lore.add(ChatColor.translateAlternateColorCodes('&', "&7" + ChatColor.stripColor(line)));
                 lore.add(" ");
             }
 
@@ -120,8 +119,7 @@ public final class QuestListMenu implements Listener {
 
             String reward = rewardOf(d);
             if (reward != null && !reward.isBlank()) {
-                lore.add(ChatColor.translateAlternateColorCodes('&',
-                        "&eReward: &f" + ChatColor.stripColor(reward)));
+                lore.add(ChatColor.translateAlternateColorCodes('&', "&eReward: &f" + ChatColor.stripColor(reward)));
             }
 
             lore.add(" ");
@@ -135,29 +133,46 @@ public final class QuestListMenu implements Listener {
         }
     }
 
+    // ========================== EVENT HANDLING =============================
+
     @EventHandler
     public void onClick(InventoryClickEvent e) {
         if (!(e.getInventory().getHolder() instanceof GuiHolder gh)) return;
         if (!"Q_LIST".equals(gh.id())) return;
+
+        // 완전 차단
         e.setCancelled(true);
+        if (e.getClickedInventory() == null) return;
+        if (e.getClickedInventory().getType() != org.bukkit.event.inventory.InventoryType.CHEST) {
+            e.setCancelled(true);
+            return;
+        }
+
+        // shift-click 등 모든 행위 차단
+        switch (e.getAction()) {
+            case MOVE_TO_OTHER_INVENTORY, HOTBAR_MOVE_AND_READD, HOTBAR_SWAP, COLLECT_TO_CURSOR,
+                 DROP_ONE_CURSOR, DROP_ALL_CURSOR, DROP_ONE_SLOT, DROP_ALL_SLOT, PLACE_ALL, PLACE_SOME,
+                 PLACE_ONE, PICKUP_ALL, PICKUP_HALF, PICKUP_SOME, PICKUP_ONE -> e.setCancelled(true);
+            default -> {}
+        }
+
         if (!(e.getWhoClicked() instanceof Player p)) return;
 
         Inventory inv = e.getInventory();
         int slot = e.getRawSlot();
         int page = getCurrentPage(p, e);
 
+        // GUI 버튼 처리
         if (slot == 1) {
             plugin.gui().sound(p, "click");
             Bukkit.getScheduler().runTaskLater(plugin, () -> plugin.gui().openLeaderboard(p), 1L);
             return;
         }
-
         if (slot == 2) {
             plugin.gui().sound(p, "click");
             Bukkit.getScheduler().runTaskLater(plugin, () -> plugin.gui().openPublic(p), 1L);
             return;
         }
-
         if (slot == 0) {
             p.closeInventory();
             ChatInput.get().await(p, plugin.msg().get("gui.list.search_prompt"), (pp, text) -> {
@@ -166,7 +181,6 @@ public final class QuestListMenu implements Listener {
             });
             return;
         }
-
         if (slot == 8) {
             boolean next = !getAsc(p);
             plugin.gui().putSession(p, "list_sort_asc", next);
@@ -178,21 +192,18 @@ public final class QuestListMenu implements Listener {
             plugin.gui().sound(p, "page");
             return;
         }
-
         if (slot == 45) {
             int newPage = Math.max(0, page - 1);
             plugin.gui().sound(p, "page");
             Bukkit.getScheduler().runTaskLater(plugin, () -> open(p, newPage), 1L);
             return;
         }
-
         if (slot == 53) {
             int newPage = page + 1;
             plugin.gui().sound(p, "page");
             Bukkit.getScheduler().runTaskLater(plugin, () -> open(p, newPage), 1L);
             return;
         }
-
         if (slot == 49) {
             p.closeInventory();
             ChatInput.get().await(p, plugin.msg().get("gui.list.page_input_prompt"), (pp, text) -> {
@@ -206,6 +217,7 @@ public final class QuestListMenu implements Listener {
             return;
         }
 
+        // 클릭된 퀘스트
         ItemStack clicked = e.getCurrentItem();
         if (clicked == null || !clicked.hasItemMeta()) return;
         String name = ChatColor.stripColor(clicked.getItemMeta().getDisplayName());
@@ -217,7 +229,6 @@ public final class QuestListMenu implements Listener {
             plugin.gui().sound(p, "click");
             Bukkit.getScheduler().runTaskLater(plugin, () -> open(p, page), 2L);
         }
-
         if (e.getClick().isRightClick()) {
             openConfirmCancel(p, d, page);
         }
@@ -227,8 +238,15 @@ public final class QuestListMenu implements Listener {
     public void onDrag(InventoryDragEvent e) {
         if (!(e.getInventory().getHolder() instanceof GuiHolder gh)) return;
         if (!"Q_LIST".equals(gh.id())) return;
-        e.setCancelled(true);
+        for (int slot : e.getRawSlots()) {
+            if (slot < e.getInventory().getSize()) {
+                e.setCancelled(true);
+                return;
+            }
+        }
     }
+
+    // ======================================================================
 
     private void openConfirmCancel(Player p, QuestDef quest, int backPage) {
         String title = ChatColor.translateAlternateColorCodes('&',
@@ -246,31 +264,7 @@ public final class QuestListMenu implements Listener {
         plugin.gui().putSession(p, "confirm_back_page", backPage);
     }
 
-    @EventHandler
-    public void onConfirmClick(InventoryClickEvent e) {
-        if (!(e.getInventory().getHolder() instanceof GuiHolder gh)) return;
-        if (!"Q_CONFIRM".equals(gh.id())) return;
-        e.setCancelled(true);
-        if (!(e.getWhoClicked() instanceof Player p)) return;
-
-        QuestDef quest = (QuestDef) plugin.gui().getSession(p, "confirm_target");
-        Object obj = plugin.gui().getSession(p, "confirm_back_page");
-        int backPage = obj instanceof Integer i ? i : 0;
-        if (quest == null) return;
-
-        if (e.getRawSlot() == 11) {
-            plugin.engine().cancelQuest(p, quest.id);
-            p.sendMessage(ChatColor.translateAlternateColorCodes('&',
-                    "&eQuest &f" + displayNameOf(quest) + " &ehas been cancelled."));
-            plugin.gui().sound(p, "cancel");
-            Bukkit.getScheduler().runTaskLater(plugin, () -> open(p, backPage), 1L);
-        }
-
-        if (e.getRawSlot() == 15) {
-            plugin.gui().sound(p, "click");
-            Bukkit.getScheduler().runTaskLater(plugin, () -> open(p, backPage), 1L);
-        }
-    }
+    // ========================== UTILITIES =============================
 
     private List<String> descriptionOf(QuestDef q) {
         try {
@@ -281,9 +275,8 @@ public final class QuestListMenu implements Listener {
                 Field df = disp.getClass().getDeclaredField("description");
                 df.setAccessible(true);
                 Object v = df.get(disp);
-                if (v instanceof List<?> l) {
+                if (v instanceof List<?> l)
                     return l.stream().map(String::valueOf).collect(Collectors.toList());
-                }
             }
         } catch (Throwable ignored) {}
         return Collections.emptyList();
@@ -329,9 +322,8 @@ public final class QuestListMenu implements Listener {
                 Field df = disp.getClass().getDeclaredField("description");
                 df.setAccessible(true);
                 Object v = df.get(disp);
-                if (v instanceof List<?> l) {
+                if (v instanceof List<?> l)
                     return l.stream().map(String::valueOf).collect(Collectors.toList());
-                }
             }
         } catch (Throwable ignored) {}
         return Collections.emptyList();
@@ -355,10 +347,12 @@ public final class QuestListMenu implements Listener {
     private ItemStack icon(Material m, String name, List<String> lore) {
         ItemStack it = new ItemStack(m == null ? Material.BOOK : m);
         ItemMeta im = it.getItemMeta();
-        if (name != null) im.setDisplayName(ChatColor.translateAlternateColorCodes('&', name));
+        if (name != null)
+            im.setDisplayName(ChatColor.translateAlternateColorCodes('&', name));
         if (lore != null) {
             List<String> colored = new ArrayList<>();
-            for (String l : lore) colored.add(ChatColor.translateAlternateColorCodes('&', l));
+            for (String l : lore)
+                colored.add(ChatColor.translateAlternateColorCodes('&', l));
             im.setLore(colored);
         }
         it.setItemMeta(im);
@@ -399,7 +393,6 @@ public final class QuestListMenu implements Listener {
     private int getCurrentPage(Player p, InventoryClickEvent e) {
         Object obj = plugin.gui().getSession(p, "list_page");
         if (obj instanceof Integer i) return i;
-
         String title = ChatColor.stripColor(e.getView().getTitle());
         Matcher m = pagePattern.matcher(title);
         if (m.find()) {
@@ -439,14 +432,13 @@ public final class QuestListMenu implements Listener {
             p.sendMessage(plugin.msg().pref("gui.list.quest_complete_error"));
         }
     }
+
     private QuestDef findByDisplayName(String display, Player p) {
         for (String id : plugin.engine().progress().activeQuestIds(p.getUniqueId(), p.getName())) {
             QuestDef q = plugin.engine().quests().get(id);
             if (q == null) continue;
             String name = ChatColor.stripColor(displayNameOf(q));
-            if (display.equalsIgnoreCase(name)) {
-                return q;
-            }
+            if (display.equalsIgnoreCase(name)) return q;
         }
         return null;
     }

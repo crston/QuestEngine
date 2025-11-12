@@ -22,8 +22,8 @@ import java.util.stream.Collectors;
 /**
  * PublicQuestMenu
  * - 공개 퀘스트 목록 GUI
- * - display.title, description, reward 완전 표시
- * - 색상 코드(&) 지원
+ * - 완전 보호 (아이템 꺼내기/복사/드래그 방지)
+ * - 검색, 페이지 이동, 퀘스트 수락 기능 지원
  */
 public final class PublicQuestMenu implements Listener {
 
@@ -54,7 +54,6 @@ public final class PublicQuestMenu implements Listener {
         inv.setItem(0, icon(Material.ARROW,
                 plugin.msg().get("gui.public.back"),
                 List.of(plugin.msg().get("gui.public.back_lore"))));
-
         inv.setItem(8, icon(Material.OAK_SIGN,
                 plugin.msg().get("gui.public.search"),
                 List.of(plugin.msg().get("gui.public.search_lore"))));
@@ -69,22 +68,17 @@ public final class PublicQuestMenu implements Listener {
                 List.of(plugin.msg().get("gui.public.next_lore"))));
     }
 
-    // ==============================================================
-    // 퀘스트 표시
-    // ==============================================================
     private void drawQuests(Player p, Inventory inv, int page) {
         List<QuestDef> all = safeAll().stream()
                 .filter(this::isPublic)
                 .collect(Collectors.toList());
 
         Set<String> active = new HashSet<>(plugin.engine().progress().activeQuestIds(p.getUniqueId(), p.getName()));
-        all = all.stream()
-                .filter(q -> !active.contains(idOf(q)))
-                .collect(Collectors.toList());
+        all = all.stream().filter(q -> !active.contains(idOf(q))).collect(Collectors.toList());
 
-        String q = getSearch(p);
-        if (q != null && !q.isBlank()) {
-            String needle = q.toLowerCase(Locale.ROOT);
+        String search = getSearch(p);
+        if (search != null && !search.isBlank()) {
+            String needle = search.toLowerCase(Locale.ROOT);
             all = all.stream().filter(d -> {
                 String name = ChatColor.stripColor(displayNameOf(d)).toLowerCase(Locale.ROOT);
                 return name.contains(needle);
@@ -104,21 +98,15 @@ public final class PublicQuestMenu implements Listener {
             QuestDef qd = all.get(i);
             List<String> lore = new ArrayList<>();
 
-            // ── 설명
-            for (String desc : descriptionOf(qd)) {
-                lore.add("&7" + ChatColor.stripColor(desc));
-            }
+            // 설명
+            for (String desc : descriptionOf(qd)) lore.add("&7" + ChatColor.stripColor(desc));
 
-            // ── 설명과 보상 사이 한 줄 띄우기
-            lore.add(" ");
+            lore.add(" "); // 설명과 보상 사이 공백
 
-            // ── 보상
+            // 보상
             String reward = rewardOf(qd);
-            if (reward != null && !reward.isBlank()) {
-                lore.add("&e보상: &f" + ChatColor.stripColor(reward));
-            }
+            if (reward != null && !reward.isBlank()) lore.add("&e보상: &f" + ChatColor.stripColor(reward));
 
-            // ── 구분선
             lore.add(" ");
             lore.add(plugin.msg().get("gui.list.left_click_start"));
 
@@ -126,16 +114,27 @@ public final class PublicQuestMenu implements Listener {
         }
     }
 
-    // ==============================================================
-    // 클릭 처리
-    // ==============================================================
     @EventHandler
     public void onClick(InventoryClickEvent e) {
         if (!(e.getInventory().getHolder() instanceof GuiHolder gh)) return;
         if (!"Q_PUBLIC".equals(gh.id())) return;
-        e.setCancelled(true);
-        if (!(e.getWhoClicked() instanceof Player p)) return;
 
+        // 완전 보호
+        e.setCancelled(true);
+        if (e.getClickedInventory() == null) return;
+        if (e.getClickedInventory().getType() != org.bukkit.event.inventory.InventoryType.CHEST) {
+            e.setCancelled(true);
+            return;
+        }
+        switch (e.getAction()) {
+            case MOVE_TO_OTHER_INVENTORY, HOTBAR_MOVE_AND_READD, HOTBAR_SWAP, COLLECT_TO_CURSOR,
+                 DROP_ONE_CURSOR, DROP_ALL_CURSOR, DROP_ONE_SLOT, DROP_ALL_SLOT,
+                 PLACE_ALL, PLACE_SOME, PLACE_ONE, PICKUP_ALL, PICKUP_HALF,
+                 PICKUP_SOME, PICKUP_ONE -> e.setCancelled(true);
+            default -> {}
+        }
+
+        if (!(e.getWhoClicked() instanceof Player p)) return;
         int slot = e.getRawSlot();
         Object obj = plugin.gui().getSession(p, "public_page");
         int page = obj instanceof Integer i ? i : 0;
@@ -145,7 +144,6 @@ public final class PublicQuestMenu implements Listener {
             Bukkit.getScheduler().runTaskLater(plugin, () -> plugin.gui().openList(p), 1L);
             return;
         }
-
         if (slot == 8) {
             p.closeInventory();
             ChatInput.get().await(p, plugin.msg().get("gui.public.search_prompt"), (pp, text) -> {
@@ -154,14 +152,12 @@ public final class PublicQuestMenu implements Listener {
             });
             return;
         }
-
         if (slot == 45) {
             int newPage = Math.max(0, page - 1);
             plugin.gui().sound(p, "page");
             Bukkit.getScheduler().runTaskLater(plugin, () -> open(p, newPage), 1L);
             return;
         }
-
         if (slot == 53) {
             int newPage = page + 1;
             plugin.gui().sound(p, "page");
@@ -191,12 +187,14 @@ public final class PublicQuestMenu implements Listener {
     public void onDrag(InventoryDragEvent e) {
         if (!(e.getInventory().getHolder() instanceof GuiHolder gh)) return;
         if (!"Q_PUBLIC".equals(gh.id())) return;
-        e.setCancelled(true);
+        for (int slot : e.getRawSlots()) {
+            if (slot < e.getInventory().getSize()) {
+                e.setCancelled(true);
+                return;
+            }
+        }
     }
 
-    // ==============================================================
-    // 데이터 헬퍼
-    // ==============================================================
     private String getSearch(Player p) {
         Object v = plugin.gui().getSession(p, "public_search");
         return v == null ? "" : v.toString();
@@ -264,30 +262,16 @@ public final class PublicQuestMenu implements Listener {
                 Field tf = disp.getClass().getDeclaredField("title");
                 tf.setAccessible(true);
                 Object v = tf.get(disp);
-                if (v != null && !String.valueOf(v).isBlank()) {
+                if (v != null && !String.valueOf(v).isBlank())
                     return ChatColor.translateAlternateColorCodes('&', String.valueOf(v));
-                }
             }
         } catch (Throwable ignored) {}
-
         try {
             Field f = q.getClass().getDeclaredField("name");
             f.setAccessible(true);
             Object v = f.get(q);
-            if (v != null && !String.valueOf(v).isBlank()) {
-                return ChatColor.translateAlternateColorCodes('&', String.valueOf(v));
-            }
+            if (v != null) return ChatColor.translateAlternateColorCodes('&', String.valueOf(v));
         } catch (Throwable ignored) {}
-
-        try {
-            Field f = q.getClass().getDeclaredField("id");
-            f.setAccessible(true);
-            Object v = f.get(q);
-            if (v != null && !String.valueOf(v).isBlank()) {
-                return ChatColor.translateAlternateColorCodes('&', String.valueOf(v));
-            }
-        } catch (Throwable ignored) {}
-
         return "unknown";
     }
 
@@ -319,9 +303,8 @@ public final class PublicQuestMenu implements Listener {
                 Field rf = disp.getClass().getDeclaredField("reward");
                 rf.setAccessible(true);
                 Object v = rf.get(disp);
-                if (v != null && !String.valueOf(v).isBlank()) {
+                if (v != null && !String.valueOf(v).isBlank())
                     return ChatColor.translateAlternateColorCodes('&', String.valueOf(v));
-                }
             }
         } catch (Throwable ignored) {}
         return "";
@@ -355,19 +338,14 @@ public final class PublicQuestMenu implements Listener {
     private ItemStack icon(Material m, String name, List<String> lore) {
         ItemStack it = new ItemStack(m == null ? Material.BOOK : m);
         ItemMeta im = it.getItemMeta();
-
-        if (name != null) {
+        if (name != null)
             im.setDisplayName(ChatColor.translateAlternateColorCodes('&', name));
-        }
-
         if (lore != null) {
             List<String> coloredLore = new ArrayList<>(lore.size());
-            for (String line : lore) {
+            for (String line : lore)
                 coloredLore.add(ChatColor.translateAlternateColorCodes('&', line));
-            }
             im.setLore(coloredLore);
         }
-
         it.setItemMeta(im);
         return it;
     }

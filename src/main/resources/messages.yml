@@ -1,41 +1,30 @@
 prefix: "&7[&aQuestEngine&7] "
 
-vault_missing: "&cVault plugin not found. Some features are disabled."
+vault_missing: "&cVault plugin not found. Some features have been disabled."
 quest_already_active: "&cYou are already on this quest."
-quest_started: "&aYou have started the quest '%quest_name%'!"
-quest_not_active: "&cYou are not currently on this quest."
-quest_canceled: "&eYou have canceled the quest '%quest_name%'."
-quest_stopped: "&7The quest '%quest_name%' has been forcibly stopped."
+quest_started: "&aYou have started the quest &e%quest_name%&a!"
+quest_not_active: "&cThat quest is not currently active."
+quest_canceled: "&eYou have canceled the quest &f%quest_name%&e."
+quest_stopped: "&7The quest &f%quest_name%&7 has been forcibly stopped."
 abandon_all_done: "&7All active quests have been abandoned."
 list_empty: "&7You have no active quests."
 list_header: "&a===== &fActive Quest List &a====="
 list_line: "&f- &a%quest_name% &7(&e%value% / %target%&7)"
-quest_completed: "&6Quest '%quest_name%' completed! Reward received!"
+quest_completed: "&6You have completed the quest &e%quest_name%&6! Rewards received."
 reload_done: "&aQuest configuration reloaded successfully."
 invalid_args: "&cInvalid command arguments."
-player_only: "&cThis command can only be used by players."
-quest_repeat_ready: "&6Quest '%quest_name%' is available again. Retry with /quest start %quest_id%!"
+player_only: "&cOnly players can use this command."
+quest_repeat_ready: "&6You can now restart the quest &e%quest_name%&6."
 
-admin:
-  usage: "&7/questadmin <reload|give|complete|stop|reset|list>"
-  reloaded: "&aAll quests reloaded successfully!"
-  invalid_args: "&cInvalid arguments!"
-  offline: "&cThe player is offline!"
-  started: "&aStarted the quest: %quest_name%"
-  stopped: "&cStopped the quest: %quest_name%"
-  completed: "&bManually completed the quest: %quest_name%"
-  reset_done: "&eQuest progress reset for: %quest_name%"
-  list_header: "&6==== Quests of %player% ===="
-  no_active: "&7No active quests."
+# ==========================================================
+# Newly added messages
+# ==========================================================
 
-list:
-  empty: "&7You have no active quests."
-  header: "&e[Active Quest List]"
-  title: "&e%title% &7(%value%/%target%)"
-  desc: " &7- %desc%"
-  progress: "&fProgress %bar% &7(%percent%%)"
-  reward: "&6Reward %reward%"
-  points: "&fYour Quest Points: &a%points%"
+quest_board_only: "&7This quest can only be accepted from the Quest Board."
+quest_board_repeat: "&e%quest_name% &7has been completed. Accept it again from the Quest Board to replay."
+quest_chain: "&aYou completed &f%current%&a. Starting the next quest &e%next%&a."
+quest_chain_board: "&aYou completed &f%current%&a. The next quest &e%next%&a has been updated on the Quest Board."
+quest_chain_end: "&aYou have completed all linked quests!"
 
 # ==========================================================
 # GUI
@@ -43,7 +32,7 @@ list:
 gui:
   title:
     list: "&aActive Quests"
-    public: "&bPublic Quests"
+    public: "&bQuest Board"
     leaderboard: "&6Leaderboard"
   lore:
     list:
@@ -54,65 +43,4 @@ gui:
     title: "&cConfirm Quest Cancellation: %quest%"
     yes_lore: "&7Are you sure you want to cancel the quest '%quest%'?"
     no_lore: "&7No, go back."
-    cancel_done: "&eThe quest '%quest%' has been cancelled."
-
-  # ------------------------------
-  # Personal Quest List (QuestListMenu)
-  # ------------------------------
-  list:
-    title: "&bQuest List &7| &fPage %page%"
-    search: "&f🔍 Search"
-    search_lore: "&7Click to enter a search keyword"
-    search_prompt: "Enter a keyword (leave blank for all)"
-    leaderboard: "&6🏆 Leaderboard"
-    leaderboard_lore: "&7Click to view quest rankings"
-    public: "&b📖 Public Quests"
-    public_lore: "&7Click to open the public quest list"
-    sort: "&fSort: &e%order%"
-    sort_lore: "&7Click to change the sorting order"
-    order_asc: "Ascending"
-    order_desc: "Descending"
-    prev: "&fPrevious Page"
-    next: "&fNext Page"
-    page_input: "&fGo to Page"
-    page_input_lore: "&7Click and enter a page number"
-    page_input_prompt: "Enter the page number to go to"
-    left_click_start: "&aLeft-click: Start quest"
-    left_click_complete: "&aLeft-click: Try to complete quest"
-    right_click_cancel: "&cRight-click: Cancel quest"
-    quest_completed: "&aQuest completed: &f%quest%"
-    quest_cancelled: "&7Quest cancelled: &f%quest%"
-    quest_cannot_complete: "&cYou don’t meet the completion conditions."
-    quest_complete_error: "&cAn error occurred while completing the quest."
-    method_missing: "&cCould not find completion method."
-
-  # ------------------------------
-  # Public Quest List (PublicQuestMenu)
-  # ------------------------------
-  public:
-    title: "&bPublic Quests | &fPage %page%"
-    back: "&f← Back to My Quests"
-    back_lore: "&7Click to return to your quest list"
-    search: "&f🔍 Search"
-    search_lore: "&7Click to enter a keyword for public quests"
-    search_prompt: "Enter a keyword (leave blank for all)"
-    prev: "&fPrevious Page"
-    prev_lore: "&7Click to go to the previous page"
-    next: "&fNext Page"
-    next_lore: "&7Click to go to the next page"
-    accept_lore: "&aLeft-click: Accept quest"
-    cancel_lore: "&cRight-click: Cancel quest"
-    accepted: "&aAccepted quest '%quest%'!"
-    cancelled: "&eCancelled quest '%quest%'."
-    error_accept: "&cAn error occurred while accepting the quest."
-
-  # ------------------------------
-  # Leaderboard (LeaderboardMenu)
-  # ------------------------------
-  leaderboard:
-    title: "&6Quest Leaderboard"
-    back: "&f← Back to My Quests"
-    back_lore: "&7Click to return to your personal quest list"
-    rank_format: "&e#%rank% &f%player% &7- &a%points% pts"
-    rank_points: "&7Points: &f%points%"
-    no_data: "&7No data to display."
+    cancel_done: "&eThe quest '%quest%' has been canceled."

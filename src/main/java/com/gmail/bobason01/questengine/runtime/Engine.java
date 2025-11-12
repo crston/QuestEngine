@@ -15,18 +15,16 @@ import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.player.AsyncPlayerChatEvent;
 import org.bukkit.event.player.PlayerCommandPreprocessEvent;
 
-import java.lang.reflect.Method;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.function.Supplier;
 
 /**
- * Engine — QuestEngine 핵심 엔진 (극한 성능 버전)
- * - 조건 캐시 / 이벤트 디듀프 / 리플렉션 캐시
- * - 기본/동적 이벤트 처리, 커스텀 컨텍스트 처리
- * - 일일 리셋 스케줄러, 내부 퀘스트 프리로드
- * - 명령측에서 요구하는 전 API 제공
+ * Engine
+ * 핵심 엔진
+ * 조건 캐시 이벤트 디듀프 타겟 매처 체인 처리 보드 반복 처리
  */
 public final class Engine {
 
@@ -40,7 +38,6 @@ public final class Engine {
     private final Map<String, BoolCacheEntry> conditionCache = new ConcurrentHashMap<>(1024);
     private final Map<UUID, Object> playerLocks = new ConcurrentHashMap<>(256);
     private final Map<UUID, Map<String, Long>> recentEventWindow = new ConcurrentHashMap<>(256);
-    private final Map<String, Method> reflectCache = new ConcurrentHashMap<>(256);
     private final Map<String, TargetMatcher> matchers = new ConcurrentHashMap<>(64);
 
     private final long conditionTtlNanos;
@@ -57,12 +54,14 @@ public final class Engine {
         boolean test(Player p, Event e, String target);
     }
 
-    public Engine(QuestEnginePlugin plugin,
-                  QuestRepository quests,
-                  ProgressRepository progress,
-                  ActionExecutor actions,
-                  Msg msg,
-                  ExecutorService worker) {
+    public Engine(
+            QuestEnginePlugin plugin,
+            QuestRepository quests,
+            ProgressRepository progress,
+            ActionExecutor actions,
+            Msg msg,
+            ExecutorService worker
+    ) {
         this.plugin = plugin;
         this.quests = quests;
         this.progress = progress;
@@ -81,37 +80,25 @@ public final class Engine {
         preloadInternalQuests();
     }
 
-    // =============================================================
-    // 공개 게터 (명령/외부에서 사용)
-    // =============================================================
     public QuestRepository quests() { return quests; }
     public ProgressRepository progress() { return progress; }
     public ActionExecutor actions() { return actions; }
     public Msg msg() { return msg; }
     public ExecutorService asyncPool() { return worker; }
 
-    // =============================================================
-    // 관리/유틸
-    // =============================================================
-    /** 이벤트 맵 리프레시 (리로드 후 호출) */
     public void refreshEventCache() {
         quests.reload();
         quests.rebuildEventMap();
     }
 
-    /** 엔진 종료 */
     public void shutdown() {
         try { worker.shutdownNow(); } catch (Throwable ignored) {}
         conditionCache.clear();
-        reflectCache.clear();
         playerLocks.clear();
         recentEventWindow.clear();
+        matchers.clear();
     }
 
-    // =============================================================
-    // 퀘스트 수동 제어 (명령어에서 호출)
-    // =============================================================
-    /** /quest start <id> 형태 지원 */
     public void startQuest(Player p, String questId) {
         if (p == null || questId == null) return;
         QuestDef q = quests.get(questId);
@@ -122,39 +109,46 @@ public final class Engine {
         startQuest(p, q);
     }
 
-    /** 객체 기반 시작 */
     public void startQuest(Player p, QuestDef q) {
         if (p == null || q == null) return;
-        if (progress.isActive(p.getUniqueId(), p.getName(), q.id)) {
+        UUID uid = p.getUniqueId();
+        String name = p.getName();
+
+        if (progress.isActive(uid, name, q.id)) {
             p.sendMessage(msg.pref("quest_already_active"));
             return;
         }
+
+        if (isBoardQuest(q) && !allowBoardStartContext(p)) {
+            p.sendMessage(msg.pref("quest_board_only"));
+            return;
+        }
+
         actions.runAll(q, "accept", p);
-        progress.start(p.getUniqueId(), p.getName(), q.id);
+        progress.start(uid, name, q.id);
         actions.runAll(q, "start", p);
         p.sendMessage(msg.pref("quest_started").replace("%quest_name%", q.name));
     }
 
-    /** /quest cancel <id> 형태 지원 */
     public void cancelQuest(Player p, String questId) {
         if (p == null || questId == null) return;
         QuestDef q = quests.get(questId);
         cancelQuest(p, q);
     }
 
-    /** 객체 기반 취소 */
     public void cancelQuest(Player p, QuestDef q) {
         if (p == null || q == null) return;
-        if (!progress.isActive(p.getUniqueId(), p.getName(), q.id)) {
+        UUID uid = p.getUniqueId();
+        String name = p.getName();
+        if (!progress.isActive(uid, name, q.id)) {
             p.sendMessage(msg.pref("quest_not_active"));
             return;
         }
-        progress.cancel(p.getUniqueId(), p.getName(), q.id);
+        progress.cancel(uid, name, q.id);
         actions.runAll(q, "cancel", p);
         p.sendMessage(msg.pref("quest_canceled").replace("%quest_name%", q.name));
     }
 
-    /** 관리자 강제 중단 (UUID/이름/ID) */
     public void stopQuest(UUID uuid, String playerName, String questId) {
         if (uuid == null || playerName == null || questId == null) return;
         progress.cancel(uuid, playerName, questId);
@@ -166,7 +160,6 @@ public final class Engine {
         }
     }
 
-    /** 관리자 강제 중단 (객체 기반) */
     public void stopQuest(Player p, QuestDef q) {
         if (p == null || q == null) return;
         if (!progress.isActive(p.getUniqueId(), p.getName(), q.id)) return;
@@ -174,35 +167,33 @@ public final class Engine {
         p.sendMessage(msg.pref("quest_stopped").replace("%quest_name%", q.name));
     }
 
-    /** 관리자 강제 완료 (UUID/이름/ID) */
     public void forceComplete(UUID uuid, String playerName, String questId) {
         if (uuid == null || playerName == null || questId == null) return;
         Player p = Bukkit.getPlayer(uuid);
         QuestDef q = quests.get(questId);
-        int pts = (q != null ? q.points : 0);
+        int pts = q != null ? q.points : 0;
         progress.complete(uuid, playerName, questId, pts);
         if (p != null && q != null) {
             actions.runAll(q, "success", p);
             p.sendMessage(msg.pref("quest_completed").replace("%quest_name%", q.name));
+            runCompletionFlow(p, q);
         }
     }
 
-    /** 관리자 강제 완료 (객체 기반) */
     public void forceComplete(Player p, QuestDef q) {
         if (p == null || q == null) return;
         progress.complete(p.getUniqueId(), p.getName(), q.id, q.points);
         actions.runAll(q, "success", p);
         p.sendMessage(msg.pref("quest_completed").replace("%quest_name%", q.name));
+        runCompletionFlow(p, q);
     }
 
-    /** 모든 퀘스트 포기 */
     public void abandonAll(Player p) {
         if (p == null) return;
         progress.cancelAll(p.getUniqueId(), p.getName());
         p.sendMessage(msg.pref("abandon_all_done"));
     }
 
-    /** 진행 중 퀘스트 목록 출력 (progress bar 포함) */
     public void listActiveTo(Player p) {
         if (p == null) return;
         List<String> active = progress.activeOf(p.getUniqueId(), p.getName());
@@ -210,7 +201,6 @@ public final class Engine {
             p.sendMessage(msg.pref("list_empty"));
             return;
         }
-        // 헤더 키는 messages.yml의 list_header 사용 (원 요청에서 active_quests_header 언급했어도 실제 키는 list_header)
         p.sendMessage(msg.pref("list_header"));
 
         StringBuilder sb = new StringBuilder(64);
@@ -234,10 +224,6 @@ public final class Engine {
         }
     }
 
-    // =============================================================
-    // 이벤트 처리 (기본/커스텀/동적)
-    // =============================================================
-    /** 기본 이벤트 처리: repo의 event 키를 그대로 사용 */
     public void handle(Player p, String eventName, Event e) {
         if (p == null || eventName == null) return;
         QuestDef[] list = quests.byEvent(eventName);
@@ -254,7 +240,6 @@ public final class Engine {
         });
     }
 
-    /** 컨텍스트 맵 기반 커스텀 이벤트 처리 */
     public void handleCustom(Player p, String eventKey, Map<String, Object> ctx) {
         if (p == null || eventKey == null) return;
         QuestDef[] list = quests.byEvent(eventKey);
@@ -271,7 +256,6 @@ public final class Engine {
         });
     }
 
-    /** 값 하나만 빠르게 전달하는 동적 핸들러(간이) */
     public void handleDynamic(Player p, String key, Object val) {
         if (p == null || key == null) return;
         Map<String, Object> ctx = new HashMap<>();
@@ -279,10 +263,8 @@ public final class Engine {
         handleCustom(p, key, ctx);
     }
 
-    /** 리스너가 어떤 Bukkit Event든 넘겨주면 자동 매핑 처리 */
     public void handleDynamic(Event e) {
         if (e == null) return;
-
         Player target = EventContextMapper.extractPlayer(e);
         if (target == null) return;
 
@@ -324,15 +306,7 @@ public final class Engine {
 
                     int val = progress.addProgress(uid, target.getName(), q.id, 1);
                     if (val >= q.amount) {
-                        pending.add(() -> {
-                            actions.runAll(q, "success", target);
-                            progress.complete(uid, target.getName(), q.id, q.points);
-                            if (q.repeat < 0) {
-                                progress.start(uid, target.getName(), q.id);
-                                actions.runAll(q, "restart", target);
-                                actions.runAll(q, "repeat", target);
-                            }
-                        });
+                        pending.add(() -> handleQuestCompleteOnMain(target, q));
                     }
                 }
 
@@ -347,18 +321,20 @@ public final class Engine {
         });
     }
 
-    // =============================================================
-    // 내부 처리 공통
-    // =============================================================
     private void processEventInternal(Player p, String eventName, Event e, QuestDef[] list) {
         UUID uid = p.getUniqueId();
         String name = p.getName();
+
+        boolean isInteractComplete = "ENTITY_INTERACT".equalsIgnoreCase(eventName);
+
         TargetMatcher matcher = matchers.get(eventName.toLowerCase(Locale.ROOT));
         if (matcher == null) matcher = matchers.getOrDefault("*", (pp, ee, t) -> true);
 
         List<Runnable> pending = new ArrayList<>(4);
+
         for (QuestDef q : list) {
             if (q == null) continue;
+
             if (!progress.isActive(uid, name, q.id)) continue;
 
             boolean matched = !q.hasTarget();
@@ -388,17 +364,14 @@ public final class Engine {
             }
             if (!ok) continue;
 
+            if (isInteractComplete) {
+                pending.add(() -> handleQuestCompleteOnMain(p, q));
+                continue;
+            }
+
             int val = progress.addProgress(uid, name, q.id, 1);
             if (val >= q.amount) {
-                pending.add(() -> {
-                    actions.runAll(q, "success", p);
-                    progress.complete(uid, name, q.id, q.points);
-                    if (q.repeat < 0) {
-                        progress.start(uid, name, q.id);
-                        actions.runAll(q, "restart", p);
-                        actions.runAll(q, "repeat", p);
-                    }
-                });
+                pending.add(() -> handleQuestCompleteOnMain(p, q));
             }
         }
 
@@ -439,15 +412,7 @@ public final class Engine {
             }
             if (!ok) continue;
 
-            pending.add(() -> {
-                actions.runAll(q, "success", p);
-                progress.complete(uid, name, q.id, q.points);
-                if (q.repeat < 0) {
-                    progress.start(uid, name, q.id);
-                    actions.runAll(q, "restart", p);
-                    actions.runAll(q, "repeat", p);
-                }
-            });
+            pending.add(() -> handleQuestCompleteOnMain(p, q));
         }
 
         if (!pending.isEmpty()) {
@@ -459,9 +424,79 @@ public final class Engine {
         }
     }
 
-    // =============================================================
-    // 캐시/디듀프/매처 유틸
-    // =============================================================
+    private void handleQuestCompleteOnMain(Player p, QuestDef q) {
+        UUID uid = p.getUniqueId();
+        String name = p.getName();
+
+        actions.runAll(q, "success", p);
+        progress.complete(uid, name, q.id, q.points);
+        p.sendMessage(msg.pref("quest_completed").replace("%quest_name%", q.name));
+
+        runCompletionFlow(p, q);
+    }
+
+    private void runCompletionFlow(Player p, QuestDef q) {
+        String nextId = resolveNextId(q);
+        if (nextId != null && !nextId.isBlank()) {
+            QuestDef next = quests.get(nextId);
+            if (next != null) {
+                if (isBoardQuest(next)) {
+                    p.sendMessage(
+                            msg.pref("quest_chain_board")
+                                    .replace("%current%", q.name)
+                                    .replace("%next%", next.name)
+                    );
+                } else {
+                    p.sendMessage(
+                            msg.pref("quest_chain")
+                                    .replace("%current%", q.name)
+                                    .replace("%next%", next.name)
+                    );
+                    startQuest(p, next);
+                }
+            } else {
+                p.sendMessage(msg.pref("quest_chain_end"));
+            }
+        }
+
+        if (q.repeat < 0) {
+            if (isBoardQuest(q)) {
+                p.sendMessage(
+                        msg.pref("quest_board_repeat").replace("%quest_name%", q.name)
+                );
+            } else {
+                Supplier<Boolean> started = () -> {
+                    if (progress.isActive(p.getUniqueId(), p.getName(), q.id)) return false;
+                    progress.start(p.getUniqueId(), p.getName(), q.id);
+                    actions.runAll(q, "restart", p);
+                    actions.runAll(q, "repeat", p);
+                    return true;
+                };
+                started.get();
+            }
+        }
+    }
+
+    private String resolveNextId(QuestDef q) {
+        if (q == null || q.actions == null) return null;
+        List<String> list = q.actions.get("next");
+        if (list == null || list.isEmpty()) return null;
+        String raw = list.get(0);
+        if (raw == null) return null;
+        String s = raw.trim();
+        if (s.isEmpty()) return null;
+        int sp = s.indexOf(' ');
+        return sp > 0 ? s.substring(0, sp) : s;
+    }
+
+    private boolean isBoardQuest(QuestDef q) {
+        return q != null && q.isPublic;
+    }
+
+    private boolean allowBoardStartContext(Player p) {
+        return true;
+    }
+
     private boolean cachedEval(Player p, Event e, Map<String, Object> ctx, String expr) {
         if (expr == null || expr.isEmpty()) return true;
         String key = p.getUniqueId() + "|" + expr;
@@ -531,9 +566,6 @@ public final class Engine {
         return false;
     }
 
-    // =============================================================
-    // 프리로드/스케줄
-    // =============================================================
     private void preloadInternalQuests() {
         try {
             if (plugin.getResource("quests") != null) {

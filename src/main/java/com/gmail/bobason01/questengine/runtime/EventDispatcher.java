@@ -1,8 +1,13 @@
 package com.gmail.bobason01.questengine.runtime;
 
+import io.lumine.mythic.bukkit.BukkitAPIHelper;
 import io.lumine.mythic.bukkit.events.MythicMobDeathEvent;
 import io.lumine.mythic.bukkit.events.MythicMobSpawnEvent;
+import io.lumine.mythic.core.mobs.ActiveMob;
+import net.citizensnpcs.api.CitizensAPI;
+import net.citizensnpcs.api.npc.NPC;
 import org.bukkit.Bukkit;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.*;
 import org.bukkit.event.block.*;
@@ -11,25 +16,34 @@ import org.bukkit.event.entity.*;
 import org.bukkit.event.inventory.*;
 import org.bukkit.event.player.*;
 import org.bukkit.event.world.ChunkLoadEvent;
+import org.bukkit.metadata.FixedMetadataValue;
 import org.bukkit.plugin.Plugin;
+
+import java.util.Map;
 
 /**
  * EventDispatcher
- * - QuestEngine 전용 글로벌 이벤트 브로드캐스터
- * - 모든 주요 Bukkit + MythicMobs 이벤트 감지
- * - Paper/Purpur 완전 호환
- * - 고성능 구조, 중복 감지 없음
+ * QuestEngine 글로벌 이벤트 브로드캐스터
+ * Citizens / MythicMobs / 일반 엔티티 완전 호환
+ * Paper/Purpur 완벽 지원
  */
 public final class EventDispatcher implements Listener {
 
     private final Plugin plugin;
     private final Engine engine;
+    private final boolean hasCitizens;
+    private final boolean hasMythic;
+    private final BukkitAPIHelper mythicAPI;
 
     public EventDispatcher(Plugin plugin, Engine engine) {
         this.plugin = plugin;
         this.engine = engine;
+        this.hasCitizens = Bukkit.getPluginManager().isPluginEnabled("Citizens");
+        this.hasMythic = Bukkit.getPluginManager().isPluginEnabled("MythicMobs");
+        this.mythicAPI = hasMythic ? new BukkitAPIHelper() : null;
+
         Bukkit.getPluginManager().registerEvents(this, plugin);
-        plugin.getLogger().info("[QuestEngine] EventDispatcher fully registered");
+        plugin.getLogger().info("[QuestEngine] EventDispatcher fully registered (Citizens:" + hasCitizens + ", MythicMobs:" + hasMythic + ")");
     }
 
     private void handle(Player player, String key, Event event) {
@@ -171,8 +185,36 @@ public final class EventDispatcher implements Listener {
         if (e.getDamager() instanceof Player p) handle(p, "DEAL_DAMAGE", e);
     }
 
+    // ------------------------------------------------------------------------
+    // 핵심: ENTITY_INTERACT (NPC / MythicMob / 일반 엔티티 전부 지원)
+    // ------------------------------------------------------------------------
     @EventHandler(ignoreCancelled = true)
-    public void onEntityInteract(PlayerInteractEntityEvent e) { handle(e.getPlayer(), "ENTITY_INTERACT", e); }
+    public void onEntityInteract(PlayerInteractEntityEvent e) {
+        Player p = e.getPlayer();
+        Entity target = e.getRightClicked();
+        if (target == null) return;
+
+        String id = resolveTargetId(target);
+        e.getPlayer().setMetadata("qe_last_interact", new FixedMetadataValue(plugin, id)); // optional debug marker
+
+        // 커스텀 컨텍스트로 타깃 ID도 전달
+        engine.handleCustom(p, "ENTITY_INTERACT", Map.of("target_id", id, "entity", target));
+    }
+
+    private String resolveTargetId(Entity entity) {
+        // Citizens NPC 우선
+        if (hasCitizens && CitizensAPI.hasImplementation() && CitizensAPI.getNPCRegistry().isNPC(entity)) {
+            NPC npc = CitizensAPI.getNPCRegistry().getNPC(entity);
+            if (npc != null) return "CITIZENS_" + npc.getId();
+        }
+        // MythicMobs 엔티티
+        if (hasMythic && mythicAPI != null) {
+            ActiveMob am = mythicAPI.getMythicMobInstance(entity);
+            if (am != null) return "MYTHIC_" + am.getType().getInternalName();
+        }
+        // 일반 엔티티
+        return entity.getType().name();
+    }
 
     @EventHandler(ignoreCancelled = true)
     public void onFish(PlayerFishEvent e) { handle(e.getPlayer(), "FISHING", e); }

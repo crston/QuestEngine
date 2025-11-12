@@ -1,0 +1,14 @@
+id: "talk_to_king"
+name: "Audience with the King"
+event: "ENTITY_INTERACT"
+targets: "MYTHIC_TESTKING"
+public: true
+repeat: -1
+amount: 1
+actions:
+  start:
+    - "message:&7Find the &6Test King &7in the royal hall and speak with him."
+  success:
+    - "message:&eKing: Well done, brave adventurer!"
+  next:
+    - "report_to_guard"
