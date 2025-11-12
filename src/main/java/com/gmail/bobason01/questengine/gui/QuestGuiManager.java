@@ -73,6 +73,11 @@ public final class QuestGuiManager {
 
     public void putSession(Player p, String key, Object value) {
         if (p == null || key == null) return;
+        if (value == null) {
+            Map<String, Object> map = sessions.get(p.getUniqueId());
+            if (map != null) map.remove(key);
+            return;
+        }
         sessions.computeIfAbsent(p.getUniqueId(), k -> new ConcurrentHashMap<>()).put(key, value);
     }
 
