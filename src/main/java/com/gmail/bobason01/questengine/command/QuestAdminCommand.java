@@ -65,10 +65,22 @@ public final class QuestAdminCommand extends BaseCommand implements TabCompleter
         String sub = a[0].toLowerCase(Locale.ROOT);
         switch (sub) {
             case SUB_RELOAD -> {
+                // 1. 퀘스트 다시 읽기
                 plugin.engine().quests().reload();
-                s.sendMessage(color(msg.get("admin.reloaded")));
+                plugin.engine().quests().rebuildEventMap();
+
+                // 2. 엔진 내부 캐시 갱신
+                plugin.engine().refreshEventCache();
+
+                // 3. (선택) 조건 캐시 / 타깃 매처 초기화
+                plugin.engine().shutdown();
+                plugin.engine().quests().reload(); // reload 다시 한번, shutdown 후 필요
+
+                // 4. 메시지
+                s.sendMessage(color("&a[QuestEngine] Reload complete"));
                 return true;
             }
+
             case SUB_GIVE -> { doGive(s, a); return true; }
             case SUB_STOP -> { doStop(s, a); return true; }
             case SUB_COMPLETE -> { doComplete(s, a); return true; }
@@ -158,7 +170,7 @@ public final class QuestAdminCommand extends BaseCommand implements TabCompleter
         int pts = plugin.engine().progress().getPoints(p.getUniqueId());
 
         String m = msg.get("admin.points");
-        if (m == null) m = "&e%player%님의 퀘스트 포인트: %points%";
+        if (m == null) m = "&e%player% Quest Points: %points%";
         s.sendMessage(color(m
                 .replace("%player%", p.getName())
                 .replace("%points%", Integer.toString(pts))));
