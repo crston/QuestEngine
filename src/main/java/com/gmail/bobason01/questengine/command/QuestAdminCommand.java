@@ -7,10 +7,10 @@ import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.command.*;
-import org.bukkit.entity.Player;
+        import org.bukkit.entity.Player;
 
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
+        import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -65,19 +65,19 @@ public final class QuestAdminCommand extends BaseCommand implements TabCompleter
         String sub = a[0].toLowerCase(Locale.ROOT);
         switch (sub) {
             case SUB_RELOAD -> {
-                // 1. 퀘스트 다시 읽기
-                plugin.engine().quests().reload();
-                plugin.engine().quests().rebuildEventMap();
+                try {
+                    plugin.msg().reload(); // 메시지 파일 다시 로드
+                    plugin.engine().quests().reload(); // 퀘스트 다시 로드
+                    plugin.engine().quests().rebuildEventMap(); // 이벤트 매핑 갱신
+                    plugin.engine().refreshEventCache(); // 엔진 캐시 초기화
 
-                // 2. 엔진 내부 캐시 갱신
-                plugin.engine().refreshEventCache();
-
-                // 3. (선택) 조건 캐시 / 타깃 매처 초기화
-                plugin.engine().shutdown();
-                plugin.engine().quests().reload(); // reload 다시 한번, shutdown 후 필요
-
-                // 4. 메시지
-                s.sendMessage(color("&a[QuestEngine] Reload complete"));
+                    s.sendMessage(color("&a[QuestEngine] Reload complete: messages + quests reloaded."));
+                    plugin.getLogger().info("[QuestEngine] Reload complete: messages + quests reloaded");
+                } catch (Throwable t) {
+                    s.sendMessage(color("&c[QuestEngine] Reload failed: " + t.getMessage()));
+                    plugin.getLogger().severe("[QuestEngine] Reload failed: " + t.getMessage());
+                    t.printStackTrace();
+                }
                 return true;
             }
 

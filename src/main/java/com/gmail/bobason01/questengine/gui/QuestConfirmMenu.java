@@ -5,6 +5,7 @@ import com.gmail.bobason01.questengine.quest.QuestDef;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
+import org.bukkit.Sound;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -14,10 +15,13 @@ import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 
+import java.util.List;
+
 /**
  * QuestConfirmMenu
- * Simple yes/no confirmation menu for canceling a quest
- * Fully protected from extraction and null-safe session handling
+ * - CustomModelData + ResourcePack Sound + Toggleable Buttons
+ * - Cancel confirmation for quests
+ * - TPS-safe, GC-free
  */
 public final class QuestConfirmMenu implements Listener {
 
@@ -32,15 +36,25 @@ public final class QuestConfirmMenu implements Listener {
         if (p == null || quest == null) return;
 
         String qName = quest.name != null ? quest.name : quest.id;
-        String title = plugin.msg().get("gui.confirm.title").replace("%quest%", qName);
+        String title = ChatColor.translateAlternateColorCodes('&',
+                plugin.msg().get("gui.confirm.title").replace("%quest%", qName));
 
         Inventory inv = Bukkit.createInventory(new GuiHolder("Q_CONFIRM"), 27, title);
         ((GuiHolder) inv.getHolder()).setInventory(inv);
 
-        inv.setItem(11, icon(Material.LIME_WOOL, "§aYES"));
-        inv.setItem(15, icon(Material.RED_WOOL, "§cNO"));
+        // YES 버튼
+        if (isButtonEnabled("yes")) {
+            inv.setItem(11, iconWithModel("yes",
+                    plugin.msg().get("gui.confirm.yes", "&aYES")));
+        }
 
-        plugin.gui().sound(p, "open");
+        // NO 버튼
+        if (isButtonEnabled("no")) {
+            inv.setItem(15, iconWithModel("no",
+                    plugin.msg().get("gui.confirm.no", "&cNO")));
+        }
+
+        playSounds(p, "open");
         p.openInventory(inv);
 
         plugin.gui().putSession(p, "confirm_target", quest);
@@ -53,35 +67,28 @@ public final class QuestConfirmMenu implements Listener {
 
         e.setCancelled(true);
         if (e.getClickedInventory() == null) return;
-        if (e.getClickedInventory().getType() != org.bukkit.event.inventory.InventoryType.CHEST) {
-            e.setCancelled(true);
-            return;
-        }
-
-        switch (e.getAction()) {
-            case MOVE_TO_OTHER_INVENTORY, HOTBAR_MOVE_AND_READD, HOTBAR_SWAP, COLLECT_TO_CURSOR,
-                 DROP_ONE_CURSOR, DROP_ALL_CURSOR, DROP_ONE_SLOT, DROP_ALL_SLOT,
-                 PLACE_ALL, PLACE_SOME, PLACE_ONE, PICKUP_ALL, PICKUP_HALF,
-                 PICKUP_SOME, PICKUP_ONE -> e.setCancelled(true);
-            default -> {}
-        }
-
         if (!(e.getWhoClicked() instanceof Player p)) return;
 
         QuestDef quest = (QuestDef) plugin.gui().getSession(p, "confirm_target");
         if (quest == null) return;
 
-        if (e.getRawSlot() == 11) {
+        int slot = e.getRawSlot();
+
+        // YES
+        if (slot == 11 && isButtonEnabled("yes")) {
             plugin.engine().cancelQuest(p, quest.id);
             p.sendMessage(ChatColor.translateAlternateColorCodes('&',
-                    "&eQuest &f" + (quest.name != null ? quest.name : quest.id) + " &ehas been cancelled."));
-            plugin.gui().sound(p, "cancel");
+                    plugin.msg().get("gui.confirm.cancelled")
+                            .replace("%quest%", quest.name != null ? quest.name : quest.id)));
+            playSounds(p, "cancel");
             Bukkit.getScheduler().runTaskLater(plugin, () -> plugin.gui().openList(p), 1L);
             plugin.gui().removeSession(p, "confirm_target");
+            return;
         }
 
-        if (e.getRawSlot() == 15) {
-            plugin.gui().sound(p, "click");
+        // NO
+        if (slot == 15 && isButtonEnabled("no")) {
+            playSounds(p, "click");
             Bukkit.getScheduler().runTaskLater(plugin, () -> plugin.gui().openList(p), 1L);
             plugin.gui().removeSession(p, "confirm_target");
         }
@@ -99,11 +106,42 @@ public final class QuestConfirmMenu implements Listener {
         }
     }
 
-    private ItemStack icon(Material mat, String name) {
-        ItemStack i = new ItemStack(mat);
-        ItemMeta m = i.getItemMeta();
-        m.setDisplayName(name);
-        i.setItemMeta(m);
-        return i;
+    // ==========================================================
+    //  CONFIG-BASED ICON AND SOUND SYSTEM
+    // ==========================================================
+
+    private ItemStack iconWithModel(String key, String name) {
+        String path = "gui.confirm.icons." + key;
+        String matName = plugin.getConfig().getString(path + ".material", "WOOL");
+        int model = plugin.getConfig().getInt(path + ".model", -1);
+        Material mat = Material.matchMaterial(matName);
+        if (mat == null) mat = Material.BOOK;
+
+        ItemStack it = new ItemStack(mat);
+        ItemMeta im = it.getItemMeta();
+        if (name != null)
+            im.setDisplayName(ChatColor.translateAlternateColorCodes('&', name));
+        if (model > 0)
+            im.setCustomModelData(model);
+        it.setItemMeta(im);
+        return it;
+    }
+
+    private void playSounds(Player p, String key) {
+        List<String> sounds = plugin.getConfig().getStringList("gui.sounds." + key);
+        if (sounds.isEmpty()) return;
+        for (String s : sounds) {
+            try {
+                Sound enumSound = Sound.valueOf(s);
+                p.playSound(p.getLocation(), enumSound, 1f, 1f);
+            } catch (IllegalArgumentException e) {
+                // custom resourcepack sound
+                p.playSound(p.getLocation(), s, 1f, 1f);
+            }
+        }
+    }
+
+    private boolean isButtonEnabled(String key) {
+        return plugin.getConfig().getBoolean("gui.confirm.buttons." + key, true);
     }
 }

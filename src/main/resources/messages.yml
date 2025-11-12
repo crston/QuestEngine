@@ -15,6 +15,7 @@ reload_done: "&aQuest configuration reloaded successfully."
 invalid_args: "&cInvalid command arguments."
 player_only: "&cThis command can only be used by players."
 quest_repeat_ready: "&6Quest '%quest_name%' is available again. Retry with /quest start %quest_id%!"
+quest_no_repeat: "&cYou have already completed this quest and cannot undertake it again."
 
 # ==========================================================
 # NEW QUEST BOARD & CHAIN SYSTEM
@@ -122,6 +123,8 @@ gui:
     accepted: "&aAccepted quest '%quest%'!"
     cancelled: "&eCancelled quest '%quest%'."
     error_accept: "&cAn error occurred while accepting the quest."
+    reward_label: "&eReward: &f"
+    left_click_start: "&aLeft-click: Accept quest"
 
   # ------------------------------
   # Leaderboard (LeaderboardMenu)

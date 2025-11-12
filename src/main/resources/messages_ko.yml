@@ -15,6 +15,7 @@ reload_done: "&a퀘스트 설정을 다시 불러왔습니다."
 invalid_args: "&c잘못된 명령어 인자입니다."
 player_only: "&c이 명령어는 플레이어만 사용할 수 있습니다."
 quest_repeat_ready: "&6'%quest_name%' 퀘스트를 다시 시작할 수 있습니다. /quest start %quest_id% 로 재도전하세요!"
+quest_no_repeat: "&c이미 완료한 퀘스트입니다. 다시 수행할 수 없습니다."
 
 # ==========================================================
 # 퀘스트 보드 및 연계 퀘스트
@@ -122,7 +123,8 @@ gui:
     accepted: "&a'%quest%' 퀘스트를 수락했습니다!"
     cancelled: "&e'%quest%' 퀘스트를 취소했습니다."
     error_accept: "&c퀘스트 수락 중 오류가 발생했습니다."
-
+    reward_label: "&e보상: &f"
+    left_click_start: "&a좌클릭: 퀘스트 수락"
   # ------------------------------
   # 리더보드 (LeaderboardMenu)
   # ------------------------------

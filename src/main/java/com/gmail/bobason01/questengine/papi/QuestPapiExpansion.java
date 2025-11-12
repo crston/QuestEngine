@@ -70,13 +70,13 @@ public final class QuestPapiExpansion extends PlaceholderExpansion {
             return cur == null ? "" : cur;
         }
 
-        // --- active_{kind}_{n} ---
         if (id.startsWith("active_")) {
-            int last = id.lastIndexOf('_');
-            if (last > 0 && last < id.length() - 1) {
-                int index = fastParseInt(id, last + 1);
+            // "active_" 뒤를 분리
+            String[] parts = id.substring(7).split("_");
+            if (parts.length == 2) {
+                String kind = parts[0];
+                int index = fastParseInt(parts[1], 0);
                 if (index >= 1) {
-                    String kind = id.substring(7, last);
                     List<String> active = repo.activeQuestIds(uid, name);
                     if (index <= active.size()) {
                         String qid = active.get(index - 1);

@@ -4,8 +4,10 @@ import com.gmail.bobason01.questengine.QuestEnginePlugin;
 import com.mojang.authlib.GameProfile;
 import com.mojang.authlib.properties.Property;
 import org.bukkit.Bukkit;
+import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.OfflinePlayer;
+import org.bukkit.Sound;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -22,12 +24,14 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.stream.Collectors;
 
 /**
  * LeaderboardMenu
- * Quest points leaderboard GUI
- * Async skin fetch with cache
- * Fully protected clicks and drags
+ * - 다국어 메시지 + CustomModelData + 리소스팩 사운드 + 버튼 토글
+ * - 상위 플레이어 퀘스트 포인트 랭킹 GUI
+ * - 비동기 스킨 조회 + 캐시
+ * - 완전 보호 (아이템 꺼내기/드래그 방지)
  */
 public final class LeaderboardMenu implements Listener {
 
@@ -41,7 +45,10 @@ public final class LeaderboardMenu implements Listener {
     }
 
     public void open(Player p) {
-        String title = plugin.msg().get("gui.leaderboard.title");
+        if (p == null) return;
+
+        String title = ChatColor.translateAlternateColorCodes('&',
+                plugin.msg().get("gui.leaderboard.title"));
         Inventory inv = Bukkit.createInventory(new GuiHolder("Q_LEADERBOARD"), 54, title);
         ((GuiHolder) inv.getHolder()).setInventory(inv);
 
@@ -49,14 +56,16 @@ public final class LeaderboardMenu implements Listener {
         drawTopBar(inv);
         drawTopPlayersAsync(inv);
 
-        plugin.gui().sound(p, "open");
+        playSounds(p, "open");
         p.openInventory(inv);
     }
 
     private void drawTopBar(Inventory inv) {
-        inv.setItem(0, icon(Material.ARROW,
-                plugin.msg().get("gui.leaderboard.back"),
-                List.of(plugin.msg().get("gui.leaderboard.back_lore"))));
+        if (isButtonEnabled("back")) {
+            inv.setItem(0, iconWithModel("back",
+                    plugin.msg().get("gui.leaderboard.back"),
+                    List.of(plugin.msg().get("gui.leaderboard.back_lore"))));
+        }
     }
 
     private void drawTopPlayersAsync(Inventory inv) {
@@ -74,6 +83,7 @@ public final class LeaderboardMenu implements Listener {
                 ItemStack head = buildPlayerHead(uuid, rank, points);
                 Bukkit.getScheduler().runTask(plugin, () -> inv.setItem(slot, head));
 
+                // 온라인 모드 + 스킨 조회 캐시 처리
                 if (Bukkit.getOnlineMode() && !TEXTURE_CACHE.containsKey(uuid)) {
                     CompletableFuture.runAsync(() -> {
                         String value = fetchTextureValue(uuid);
@@ -108,8 +118,10 @@ public final class LeaderboardMenu implements Listener {
                         .replace("%points%", String.valueOf(points))
         );
 
-        meta.setDisplayName(display);
-        meta.setLore(lore);
+        meta.setDisplayName(ChatColor.translateAlternateColorCodes('&', display));
+        meta.setLore(lore.stream()
+                .map(s -> ChatColor.translateAlternateColorCodes('&', s))
+                .collect(Collectors.toList()));
 
         String cached = TEXTURE_CACHE.get(uuid);
         if (cached != null) {
@@ -151,22 +163,11 @@ public final class LeaderboardMenu implements Listener {
 
         e.setCancelled(true);
         if (e.getClickedInventory() == null) return;
-        if (e.getClickedInventory().getType() != org.bukkit.event.inventory.InventoryType.CHEST) {
-            e.setCancelled(true);
-            return;
-        }
-        switch (e.getAction()) {
-            case MOVE_TO_OTHER_INVENTORY, HOTBAR_MOVE_AND_READD, HOTBAR_SWAP, COLLECT_TO_CURSOR,
-                 DROP_ONE_CURSOR, DROP_ALL_CURSOR, DROP_ONE_SLOT, DROP_ALL_SLOT,
-                 PLACE_ALL, PLACE_SOME, PLACE_ONE, PICKUP_ALL, PICKUP_HALF,
-                 PICKUP_SOME, PICKUP_ONE -> e.setCancelled(true);
-            default -> {}
-        }
-
         if (!(e.getWhoClicked() instanceof Player p)) return;
+
         int slot = e.getRawSlot();
-        if (slot == 0) {
-            plugin.gui().sound(p, "click");
+        if (slot == 0 && isButtonEnabled("back")) {
+            playSounds(p, "click");
             Bukkit.getScheduler().runTaskLater(plugin, () -> plugin.gui().openList(p), 1L);
         }
     }
@@ -183,21 +184,50 @@ public final class LeaderboardMenu implements Listener {
         }
     }
 
-    private void fill(Inventory inv) {
-        ItemStack f = new ItemStack(Material.GRAY_STAINED_GLASS_PANE);
-        ItemMeta im = f.getItemMeta();
-        im.setDisplayName(" ");
-        f.setItemMeta(im);
-        for (int i = 0; i < inv.getSize(); i++) inv.setItem(i, f);
+    // ==============================================================
+    // Config-based helpers (icon, sound, toggle)
+    // ==============================================================
+
+    private ItemStack iconWithModel(String key, String name, List<String> lore) {
+        String path = "gui.leaderboard.icons." + key;
+        String matName = plugin.getConfig().getString(path + ".material", "BOOK");
+        int model = plugin.getConfig().getInt(path + ".model", -1);
+        Material mat = Material.matchMaterial(matName);
+        if (mat == null) mat = Material.BOOK;
+        return icon(mat, name, lore, model);
     }
 
-    private ItemStack icon(Material m, String name, List<String> lore) {
+    private ItemStack icon(Material m, String name, List<String> lore, int model) {
         ItemStack it = new ItemStack(m == null ? Material.BOOK : m);
         ItemMeta im = it.getItemMeta();
-        im.setDisplayName(name);
-        if (lore != null) im.setLore(lore);
+        if (name != null) im.setDisplayName(ChatColor.translateAlternateColorCodes('&', name));
+        if (lore != null && !lore.isEmpty()) {
+            List<String> colored = lore.stream()
+                    .map(s -> ChatColor.translateAlternateColorCodes('&', s))
+                    .collect(Collectors.toList());
+            im.setLore(colored);
+        }
+        if (model > 0) im.setCustomModelData(model);
         it.setItemMeta(im);
         return it;
+    }
+
+    private void playSounds(Player p, String key) {
+        List<String> sounds = plugin.getConfig().getStringList("gui.sounds." + key);
+        if (sounds.isEmpty()) return;
+        for (String s : sounds) {
+            try {
+                Sound enumSound = Sound.valueOf(s);
+                p.playSound(p.getLocation(), enumSound, 1f, 1f);
+            } catch (IllegalArgumentException e) {
+                // 리소스팩 커스텀 사운드
+                p.playSound(p.getLocation(), s, 1f, 1f);
+            }
+        }
+    }
+
+    private boolean isButtonEnabled(String key) {
+        return plugin.getConfig().getBoolean("gui.leaderboard.buttons." + key, true);
     }
 
     private int[] gridSlots() {
@@ -207,5 +237,13 @@ public final class LeaderboardMenu implements Listener {
                 28, 29, 30, 31, 32, 33, 34,
                 37, 38, 39, 40, 41, 42, 43
         };
+    }
+
+    private void fill(Inventory inv) {
+        ItemStack f = new ItemStack(Material.GRAY_STAINED_GLASS_PANE);
+        ItemMeta im = f.getItemMeta();
+        im.setDisplayName(" ");
+        f.setItemMeta(im);
+        for (int i = 0; i < inv.getSize(); i++) inv.setItem(i, f);
     }
 }

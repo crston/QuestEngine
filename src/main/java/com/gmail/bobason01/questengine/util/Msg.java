@@ -81,6 +81,11 @@ public final class Msg {
         );
     }
 
+    public String get(String key, String def) {
+        String val = get(key);
+        return (val == null || val.isEmpty()) ? def : val;
+    }
+
     /** prefix 포함 */
     public String pref(String key) {
         return cache.computeIfAbsent("pref:" + key, k ->

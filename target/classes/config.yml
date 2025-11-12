@@ -3,85 +3,133 @@
 # Extreme Performance & Modular Design
 # ==============================================================
 
-# --------------------------------------------------------------
-# Performance settings
-# --------------------------------------------------------------
 performance:
-  # Condition evaluation cache TTL (ms)
-  # Reuses cached results for identical conditions evaluated repeatedly in a short time.
-  # Too low → higher CPU usage; too high → delayed updates.
   condition-cache-ttl-ms: 300
-
-  # Event deduplication window (ms)
-  # Filters out identical events triggered too rapidly in succession.
-  # 10ms is usually enough to prevent duplicates from rapid block breaks or item use.
   event-dedup-window-ms: 10
 
-# --------------------------------------------------------------
-# Reset (Daily quest reset schedule)
-# --------------------------------------------------------------
 reset:
-  # Default reset time if not specified in individual quest YAMLs
-  default-time: "04:00"  # Default: 4 AM KST
+  default-time: "04:00"
 
-# --------------------------------------------------------------
-# Storage settings
-# --------------------------------------------------------------
 storage:
-  # Choose the storage type
-  # - FILE   : Fast and simple (small servers)
-  # - YAML   : Human-readable format
-  # - SQLITE : Built-in lightweight database (medium servers)
-  # - MYSQL  : External database (large-scale servers)
   type: SQLITE
-
-  # File storage configuration (type: FILE)
   file:
     folder: data/playerdata
-
-  # YAML storage configuration (type: YAML)
   yaml:
     folder: data/playerdata_yaml
-
-  # SQLite storage configuration (type: SQLITE)
   sqlite:
     file: data/questengine.db
-
-  # MySQL storage configuration (type: MYSQL)
   mysql:
     host: localhost
     port: 3306
     database: questengine
     user: root
     password: ""
-    # Advanced options (usually do not need to change)
     options:
       useSSL: false
       characterEncoding: utf8
       serverTimezone: UTC
       rewriteBatchedStatements: true
 
-# --------------------------------------------------------------
-# Quest folder settings
-# --------------------------------------------------------------
 quests:
-  # Folder that contains quest definitions (plugins/QuestEngine/quests)
   folder: quests
 
-# --------------------------------------------------------------
-# Party integration
-# --------------------------------------------------------------
 party:
-  # Enable shared quests for parties
-  enabled: true
-  # Supported party systems (auto: auto-detect)
+  enabled: false
   provider: auto
 
-# --------------------------------------------------------------
-# Debug & logging
-# --------------------------------------------------------------
 debug:
   enabled: false
   log-events: false
   log-conditions: false
   log-actions: false
+
+# --------------------------------------------------------------
+# GUI Settings
+# --------------------------------------------------------------
+gui:
+  list:
+    buttons:
+      search: true
+      leaderboard: true
+      public: true
+      sort: true
+      prev: true
+      next: true
+      page_input: true
+
+  confirm:
+    buttons:
+      yes: true
+      no: true
+
+  public:
+    buttons:
+      back: true
+      search: true
+      prev: true
+      next: true
+    icons:
+      back:
+        material: ARROW
+        model: 111
+      search:
+        material: OAK_SIGN
+        model: 112
+      prev:
+        material: ARROW
+        model: 113
+      next:
+        material: ARROW
+        model: 114
+
+  leaderboard:
+    buttons:
+      back: true
+    icons:
+      back:
+        material: ARROW
+        model: 121
+
+  icons:
+    search:
+      material: OAK_SIGN
+      model: 101
+    leaderboard:
+      material: PLAYER_HEAD
+      model: 102
+    public:
+      material: BOOK
+      model: 103
+    sort:
+      material: COMPARATOR
+      model: 104
+    prev:
+      material: ARROW
+      model: 105
+    next:
+      material: ARROW
+      model: 106
+    page_input:
+      material: NAME_TAG
+      model: 107
+    yes:
+      material: LIME_WOOL
+      model: 201
+    no:
+      material: RED_WOOL
+      model: 202
+
+  sounds:
+    open:
+      - "custom.menu.open"
+    click:
+      - "custom.ui.click"
+      - "UI_BUTTON_CLICK"
+    page:
+      - "custom.ui.page"
+    cancel:
+      - "custom.quest.cancel"
+    success:
+      - "custom.quest.success"
+    error:
+      - "custom.ui.error"

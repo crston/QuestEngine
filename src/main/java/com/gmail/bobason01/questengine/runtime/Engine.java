@@ -115,25 +115,38 @@ public final class Engine {
         startQuest(p, q);
     }
 
+    // Engine.java 내부 startQuest(Player p, QuestDef q)
     public void startQuest(Player p, QuestDef q) {
         if (p == null || q == null) return;
         UUID uid = p.getUniqueId();
         String name = p.getName();
 
+        // 이미 완료한 퀘스트면 재수행 불가
+        if (progress.isCompleted(uid, name, q.id)) {
+            p.sendMessage(msg.pref("quest_no_repeat").replace("%quest_name%", q.name));
+            return;
+        }
+
+        // 이미 진행 중인 퀘스트면 중복 방지
         if (progress.isActive(uid, name, q.id)) {
             p.sendMessage(msg.pref("quest_already_active"));
             return;
         }
 
+        // 보드 전용인데 직접 명령어로 시도하면 거부
         if (isBoardQuest(q) && !allowBoardStartContext(p)) {
             p.sendMessage(msg.pref("quest_board_only"));
             return;
         }
 
-        actions.runAll(q, "accept", p);
+        // PUBLIC 퀘스트일 경우 accept 메시지와 started 메시지 생략
+        if (!isBoardQuest(q)) {
+            actions.runAll(q, "accept", p);
+            p.sendMessage(msg.pref("quest_started").replace("%quest_name%", q.name));
+        }
+
         progress.start(uid, name, q.id);
         actions.runAll(q, "start", p);
-        p.sendMessage(msg.pref("quest_started").replace("%quest_name%", q.name));
     }
 
     public void cancelQuest(Player p, String questId) {
