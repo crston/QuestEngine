@@ -1,0 +1,25 @@
+name: "Hero’s Ceremony"
+id: hero_ceremony
+event: CUSTOM_EVENT
+amount: 1
+points: 5
+start_mode: AUTO
+
+display:
+  title: "&6Hero’s Ceremony"
+  description:
+    - "&7Attend the ceremony when the bells ring."
+  reward: "&eReward: 100 Coins"
+
+custom_event_data:
+  event: org.bukkit.event.player.PlayerToggleSneakEvent
+  player_variable: getPlayer()
+  variables_to_capture:
+    - "%is_sneaking%;isSneaking()"
+
+actions:
+  start:
+    - msg{t="&7Wait for the ceremony to begin..." } @self
+  success:
+    - msg{t="&aYou bowed before the king. You are now a recognized hero!"} @self
+    - command{c="eco give %player% 100"} @server

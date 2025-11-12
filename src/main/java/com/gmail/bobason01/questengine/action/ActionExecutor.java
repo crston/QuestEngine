@@ -106,12 +106,27 @@ public final class ActionExecutor {
     }
 
     /** 퀘스트의 특정 액션 시퀀스를 실행 */
-    public void runAll(QuestDef q, String key, Player p) {
-        List<String> raw = q.actions.get(key);
-        if (raw == null || raw.isEmpty()) return;
-        CacheKey ck = new CacheKey(q.id, key);
-        List<ActionEntry> entries = compiledCache.computeIfAbsent(ck, k -> compile(raw));
-        runEntries(entries, q, p);
+    public void runAll(QuestDef q, String type, Player p) {
+        if (q == null || q.actions == null) return;
+
+        List<String> list = null;
+        for (Map.Entry<String, List<String>> e : q.actions.entrySet()) {
+            if (e.getKey().equalsIgnoreCase(type)) {
+                list = e.getValue();
+                break;
+            }
+        }
+
+        // 아무 액션이 없으면 그냥 조용히 무시
+        if (list == null || list.isEmpty()) return;
+
+        for (String s : list) {
+            try {
+                executeLine(q, s, p);
+            } catch (Throwable t) {
+                plugin.getLogger().warning("[QuestEngine] Action failed (" + type + "): " + s + " - " + t.getMessage());
+            }
+        }
     }
 
     /** 문자열을 ActionEntry 리스트로 컴파일 */
@@ -257,10 +272,19 @@ public final class ActionExecutor {
         try { return Integer.parseInt(s.trim()); } catch (Throwable t) { return def; }
     }
 
+    /** 따옴표 인식 강화 버전 */
     private String extract(String s, String key) {
         int i = s.indexOf(key);
         if (i < 0) return "";
         int start = i + key.length();
+
+        // "..." 또는 '...' 감싸진 텍스트를 감지
+        int firstQuote = s.indexOf('"', start);
+        int lastQuote = s.lastIndexOf('"');
+        if (firstQuote >= 0 && lastQuote > firstQuote) {
+            return s.substring(firstQuote + 1, lastQuote).trim();
+        }
+
         int end = s.indexOf('}', start);
         if (end < 0) end = s.length();
         return s.substring(start, end).trim();
@@ -305,6 +329,83 @@ public final class ActionExecutor {
             return result;
         } catch (Throwable t) {
             return null;
+        }
+    }
+
+    /** 별도 run() 래퍼 */
+    /** 액션 그룹(accept/start/success 등)을 실행 */
+    public void run(QuestDef def, String key, Player p) {
+        if (def == null || key == null || p == null) return;
+
+        // 대소문자 무시하고 액션 그룹 탐색
+        List<String> list = null;
+        for (Map.Entry<String, List<String>> e : def.actions.entrySet()) {
+            if (e.getKey().equalsIgnoreCase(key)) {
+                list = e.getValue();
+                break;
+            }
+        }
+
+        if (list == null || list.isEmpty()) {
+            plugin.getLogger().info("[QuestEngine] No actions found for type=" + key + " in quest=" + def.id);
+            return;
+        }
+
+        // 여기서 직접 실행 (절대 runAll 다시 호출 금지)
+        for (String line : list) {
+            try {
+                // line 자체가 "msg{t=...}", "command{...}" 등 액션 문자열임
+                executeLine(def, line, p);
+            } catch (Throwable t) {
+                plugin.getLogger().warning("[QuestEngine] Action failed in quest " + def.id + ": " + line + " (" + t.getMessage() + ")");
+            }
+        }
+    }
+
+    /** 개별 액션 실행 (기존 runAll 안에서 쓰던 내부 로직을 분리) */
+    private void executeLine(QuestDef q, String s, Player p) {
+        if (s == null || s.isBlank()) return;
+        String line = s.trim();
+
+        if (line.startsWith("{") && line.endsWith("}")) {
+            line = line.substring(1, line.length() - 1).trim();
+        }
+
+        ActionType type;
+        Target target = line.toLowerCase(Locale.ROOT).endsWith("@server") ? Target.SERVER : Target.SELF;
+        if (target == Target.SERVER) line = line.substring(0, line.length() - 7).trim();
+
+        if (line.startsWith("msg{") || line.startsWith("message{")) {
+            type = ActionType.MESSAGE;
+        } else if (line.startsWith("cmd{") || line.startsWith("command{")) {
+            type = ActionType.COMMAND;
+        } else if (line.startsWith("item{")) {
+            type = ActionType.ITEM;
+        } else {
+            plugin.getLogger().warning("[QuestEngine] Unknown action line: " + line);
+            return;
+        }
+
+        // 여기서 기존 execute(ActionEntry) 로직을 그대로 복제해도 됨
+        // 빠르게 처리하기 위해 switch(type) 분기 직접 호출
+        switch (type) {
+            case MESSAGE -> {
+                String txt = applyPlaceholders(p, extract(line, "t="), q);
+                if (!txt.isEmpty()) p.sendMessage(ChatColor.translateAlternateColorCodes('&', txt));
+            }
+            case COMMAND -> {
+                String cmd = applyPlaceholders(p, extract(line, "c="), q);
+                if (!cmd.isEmpty()) {
+                    if (target == Target.SERVER) Bukkit.dispatchCommand(Bukkit.getConsoleSender(), cmd);
+                    else p.performCommand(cmd);
+                }
+            }
+            case ITEM -> {
+                String id = extract(line, "t=");
+                int amt = parseIntSafe(extract(line, "a="), 1);
+                ItemStack is = createItemFast(id, amt);
+                if (is != null) p.getInventory().addItem(is);
+            }
         }
     }
 }

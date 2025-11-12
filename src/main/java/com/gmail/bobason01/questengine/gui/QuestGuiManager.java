@@ -15,12 +15,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * QuestGuiManager
  * Central manager for all QuestEngine GUIs
  * Manages sessions, sounds, basic utilities, and GUI entry points
- * Registers common GUI protection listener
  */
 public final class QuestGuiManager {
 
     private final QuestEnginePlugin plugin;
-
     private final Map<UUID, Map<String, Object>> sessions = new ConcurrentHashMap<>();
 
     private final LeaderboardMenu leaderboardMenu;
@@ -34,14 +32,13 @@ public final class QuestGuiManager {
         // chat input bootstrap
         ChatInput.init(plugin);
 
-        // sub guis
+        // sub menus
         this.leaderboardMenu = new LeaderboardMenu(plugin);
         this.questListMenu = new QuestListMenu(plugin);
         this.publicQuestMenu = new PublicQuestMenu(plugin);
         this.confirmMenu = new QuestConfirmMenu(plugin);
 
-        // common protection listener
-        // constructor self registers to Bukkit with plugin name QuestEngine
+        // GUI protection listener (auto-register)
         try {
             new GuiProtectionListener();
         } catch (Throwable t) {
@@ -72,12 +69,7 @@ public final class QuestGuiManager {
     }
 
     public void putSession(Player p, String key, Object value) {
-        if (p == null || key == null) return;
-        if (value == null) {
-            Map<String, Object> map = sessions.get(p.getUniqueId());
-            if (map != null) map.remove(key);
-            return;
-        }
+        if (p == null || key == null || value == null) return;
         sessions.computeIfAbsent(p.getUniqueId(), k -> new ConcurrentHashMap<>()).put(key, value);
     }
 
@@ -85,6 +77,12 @@ public final class QuestGuiManager {
         if (p == null || key == null) return null;
         Map<String, Object> map = sessions.get(p.getUniqueId());
         return map == null ? null : map.get(key);
+    }
+
+    public void removeSession(Player p, String key) {
+        if (p == null || key == null) return;
+        Map<String, Object> map = sessions.get(p.getUniqueId());
+        if (map != null) map.remove(key);
     }
 
     public void clearSession(Player p) {
@@ -101,10 +99,9 @@ public final class QuestGuiManager {
                 case "click" -> p.playSound(p.getLocation(), Sound.UI_BUTTON_CLICK, 0.8f, 0.8f);
                 case "cancel" -> p.playSound(p.getLocation(), Sound.ENTITY_VILLAGER_NO, 0.7f, 0.9f);
                 case "success" -> p.playSound(p.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 0.7f, 1.4f);
-                default -> { /* no op */ }
+                default -> {}
             }
-        } catch (Throwable ignored) {
-        }
+        } catch (Throwable ignored) {}
     }
 
     public void fill(Inventory inv, ItemStack filler) {
@@ -114,8 +111,7 @@ public final class QuestGuiManager {
             for (int i = 0; i < inv.getSize(); i++) {
                 if (inv.getItem(i) == null) inv.setItem(i, item);
             }
-        } catch (Throwable ignored) {
-        }
+        } catch (Throwable ignored) {}
     }
 
     public ItemStack getStatic(String key) {

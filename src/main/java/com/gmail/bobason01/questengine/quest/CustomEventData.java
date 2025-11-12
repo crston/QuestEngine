@@ -41,13 +41,10 @@ public final class CustomEventData {
     public static CustomEventData load(ConfigurationSection sec) {
         if (sec == null) return new CustomEventData("", "getPlayer()", EMPTY_MAP);
 
-        // 기본값
         String eventClass = sec.getString("event", "").trim();
         String playerGetter = sec.getString("player_variable", "getPlayer()").trim();
 
-        // 고성능 LinkedHashMap (순서 유지)
         Map<String, String> map = new LinkedHashMap<>(8);
-
         List<?> raw = sec.getList("variables_to_capture");
         if (raw != null && !raw.isEmpty()) {
             for (Object obj : raw) {
@@ -58,11 +55,9 @@ public final class CustomEventData {
                 int semi = s.indexOf(';');
                 if (semi <= 0 || semi == s.length() - 1) continue;
 
-                // 변수명 추출
                 String key = s.substring(0, semi).trim();
                 String chain = s.substring(semi + 1).trim();
 
-                // %로 감싸진 변수명 처리
                 int len = key.length();
                 if (len > 2 && key.charAt(0) == '%' && key.charAt(len - 1) == '%')
                     key = key.substring(1, len - 1);
@@ -82,5 +77,29 @@ public final class CustomEventData {
                 ", playerGetter='" + playerGetter + '\'' +
                 ", captures=" + captures.size() +
                 '}';
+    }
+
+    // ------------------------------------------------------------
+    // 직렬화 (QuestDef.toYaml 등에서 사용)
+    // ------------------------------------------------------------
+    public Map<String, Object> serialize() {
+        Map<String, Object> out = new LinkedHashMap<>();
+
+        out.put("event", eventClass);
+        out.put("player_variable", playerGetter);
+
+        if (captures != null && !captures.isEmpty()) {
+            List<String> lines = new ArrayList<>(captures.size());
+            for (Map.Entry<String, String> e : captures.entrySet()) {
+                String key = e.getKey();
+                if (key != null && !key.isEmpty()) {
+                    // 저장 시 %변수명%;getSomething() 형태로 변환
+                    lines.add("%" + key + "%;" + e.getValue());
+                }
+            }
+            out.put("variables_to_capture", lines);
+        }
+
+        return out;
     }
 }

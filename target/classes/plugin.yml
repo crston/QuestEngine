@@ -1,6 +1,6 @@
 name: QuestEngine
 main: com.gmail.bobason01.questengine.QuestEnginePlugin
-version: 6.0
+version: 8.0
 api-version: 1.18
 author: crston
 softdepend:
@@ -20,10 +20,19 @@ commands:
     description: Dev command
     usage: /questengine
     permission: questengine.dev
+  questeditor:
+    description: Opens the Quest Editor GUI for creating and editing quests.
+    usage: /questeditor
+    aliases: [qedit, qed, qeditor]
+    permission: questengine.editor
+    permission-message: §cYou are not allowed to edit quests.
 permissions:
   questengine.player:
     default: true
   questengine.admin:
     default: op
   questengine.dev:
+    default: op
+  questengine.editor:
+    description: Allows access to the in-game Quest Editor.
     default: op

@@ -16,8 +16,8 @@ import org.bukkit.inventory.meta.ItemMeta;
 
 /**
  * QuestConfirmMenu
- * Simple yes no confirm menu for canceling a quest
- * Fully protected from extraction
+ * Simple yes/no confirmation menu for canceling a quest
+ * Fully protected from extraction and null-safe session handling
  */
 public final class QuestConfirmMenu implements Listener {
 
@@ -29,6 +29,8 @@ public final class QuestConfirmMenu implements Listener {
     }
 
     public void open(Player p, QuestDef quest) {
+        if (p == null || quest == null) return;
+
         String qName = quest.name != null ? quest.name : quest.id;
         String title = plugin.msg().get("gui.confirm.title").replace("%quest%", qName);
 
@@ -55,6 +57,7 @@ public final class QuestConfirmMenu implements Listener {
             e.setCancelled(true);
             return;
         }
+
         switch (e.getAction()) {
             case MOVE_TO_OTHER_INVENTORY, HOTBAR_MOVE_AND_READD, HOTBAR_SWAP, COLLECT_TO_CURSOR,
                  DROP_ONE_CURSOR, DROP_ALL_CURSOR, DROP_ONE_SLOT, DROP_ALL_SLOT,
@@ -74,13 +77,13 @@ public final class QuestConfirmMenu implements Listener {
                     "&eQuest &f" + (quest.name != null ? quest.name : quest.id) + " &ehas been cancelled."));
             plugin.gui().sound(p, "cancel");
             Bukkit.getScheduler().runTaskLater(plugin, () -> plugin.gui().openList(p), 1L);
-            plugin.gui().putSession(p, "confirm_target", null);
+            plugin.gui().removeSession(p, "confirm_target");
         }
 
         if (e.getRawSlot() == 15) {
             plugin.gui().sound(p, "click");
             Bukkit.getScheduler().runTaskLater(plugin, () -> plugin.gui().openList(p), 1L);
-            plugin.gui().putSession(p, "confirm_target", null);
+            plugin.gui().removeSession(p, "confirm_target");
         }
     }
 

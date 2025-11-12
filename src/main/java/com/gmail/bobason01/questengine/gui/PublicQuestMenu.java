@@ -146,8 +146,9 @@ public final class PublicQuestMenu implements Listener {
         }
         if (slot == 8) {
             p.closeInventory();
-            ChatInput.get().await(p, plugin.msg().get("gui.public.search_prompt"), (pp, text) -> {
-                setSearch(pp, text == null ? "" : text.trim());
+            ChatInput.await(p, plugin.msg().get("gui.public.search_prompt"), (pp, text) -> {
+                String input = text == null ? "" : text.toString().trim();
+                setSearch(pp, input);
                 Bukkit.getScheduler().runTask(plugin, () -> open(pp, 0));
             });
             return;

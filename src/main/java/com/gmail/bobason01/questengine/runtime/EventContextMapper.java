@@ -11,7 +11,9 @@ import org.bukkit.event.block.BlockEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.entity.*;
 import org.bukkit.event.inventory.CraftItemEvent;
-import org.bukkit.event.player.*;
+import org.bukkit.event.player.PlayerDropItemEvent;
+import org.bukkit.event.player.PlayerInteractEvent;
+
 import org.bukkit.inventory.ItemStack;
 
 import java.lang.reflect.Method;
@@ -27,17 +29,6 @@ public final class EventContextMapper {
 
     private static final ThreadLocal<Map<String, Object>> LOCAL_MAP =
             ThreadLocal.withInitial(() -> new HashMap<>(48));
-
-    public static void prewarm(Class<?>... eventClasses) {
-        if (eventClasses == null || eventClasses.length == 0) return;
-        for (Class<?> cls : eventClasses) {
-            try {
-                if (cls == null) continue;
-                METHOD_CACHE.computeIfAbsent(cls, EventContextMapper::scanGetters);
-                PLAYER_METHOD_CACHE.computeIfAbsent(cls, EventContextMapper::findPlayerGetter);
-            } catch (Throwable ignored) {}
-        }
-    }
 
     public static Map<String, Object> map(Event e) {
         if (e == null) return Collections.emptyMap();
@@ -100,22 +91,15 @@ public final class EventContextMapper {
 
     private static void injectShortcuts(Event e, Map<String, Object> ctx) {
         try {
-            // -----------------------------
-            // 기본: Player, World
-            // -----------------------------
             Player player = extractPlayer(e);
             if (player != null) {
                 ctx.put("player_name", player.getName());
                 if (player.getWorld() != null)
                     ctx.put("world_name", player.getWorld().getName());
             } else {
-                // 일부 이벤트(엔티티 기반 등)에서 플레이어 없음 → dummy
                 ctx.putIfAbsent("player_name", "unknown");
             }
 
-            // -----------------------------
-            // 블록 관련 이벤트 (Null-safe)
-            // -----------------------------
             if (e instanceof BlockBreakEvent be) {
                 if (be.getBlock() != null)
                     ctx.put("block_type", be.getBlock().getType().name());
@@ -127,9 +111,6 @@ public final class EventContextMapper {
                     ctx.put("block_type", be2.getBlock().getType().name());
             }
 
-            // -----------------------------
-            // 엔티티 관련 이벤트 (안전)
-            // -----------------------------
             if (e instanceof EntityEvent ee) {
                 Entity ent = ee.getEntity();
                 if (ent != null) {
@@ -155,29 +136,15 @@ public final class EventContextMapper {
                     ctx.put("victim_type", victim.getType().name());
             }
 
-            // -----------------------------
-            // 아이템 관련 이벤트 (모든 null 대응)
-            // -----------------------------
             ItemStack item = null;
 
-            if (e instanceof PlayerItemConsumeEvent ce) {
-                item = ce.getItem();
-                // 일부 Purpur 버전에서 null 반환 → 메인핸드 보정
-                if (item == null && player != null) {
-                    ItemStack hand = player.getInventory().getItemInMainHand();
-                    if (hand != null && hand.getType().isEdible())
-                        item = hand;
-                }
-            } else if (e instanceof PlayerInteractEvent ie) {
+            if (e instanceof PlayerInteractEvent ie) {
                 item = ie.getItem();
                 if (item == null && player != null)
                     item = player.getInventory().getItemInMainHand();
             } else if (e instanceof PlayerDropItemEvent dropE) {
                 if (dropE.getItemDrop() != null)
                     item = dropE.getItemDrop().getItemStack();
-            } else if (e instanceof EntityPickupItemEvent pickE) {
-                if (pickE.getItem() != null)
-                    item = pickE.getItem().getItemStack();
             } else if (e instanceof CraftItemEvent craftE) {
                 if (craftE.getRecipe() != null)
                     item = craftE.getRecipe().getResult();
@@ -191,9 +158,6 @@ public final class EventContextMapper {
                 ctx.putIfAbsent("item_type", "AIR");
             }
 
-            // -----------------------------
-            // MythicMobs 이벤트 (안전)
-            // -----------------------------
             if (e instanceof MythicMobDeathEvent mm) {
                 if (mm.getMobType() != null)
                     ctx.put("mythicmob_type", mm.getMobType().getInternalName());
@@ -202,9 +166,6 @@ public final class EventContextMapper {
                     ctx.put("mythicmob_type", ms.getMobType().getInternalName());
             }
 
-            // -----------------------------
-            // 기본값 보정 (안전 장치)
-            // -----------------------------
             ctx.putIfAbsent("world_name", "unknown_world");
             ctx.putIfAbsent("entity_type", "UNKNOWN");
             ctx.putIfAbsent("block_type", "AIR");

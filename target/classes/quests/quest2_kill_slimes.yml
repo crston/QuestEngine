@@ -1,0 +1,24 @@
+name: "Slime Cleanup"
+id: kill_slimes
+event: ENTITY_KILL
+targets:
+  - SLIME
+amount: 5
+points: 3
+start_mode: AUTO
+
+display:
+  title: "&aSlime Cleanup"
+  description:
+    - "&7Defeat 5 slimes near the village."
+  reward: "&eReward: 50 Coins"
+
+actions:
+  start:
+    - msg{t="&7The villagers are counting on you to clean up the slimes!"} @self
+  success:
+    - msg{t="&aYou’ve defeated all the slimes!"} @self
+    - command{c="eco give %player% 50"} @server
+
+chain:
+  next: report_to_guard

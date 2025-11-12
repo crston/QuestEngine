@@ -18,15 +18,20 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.HandlerList;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.net.URISyntaxException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.jar.JarEntry;
+import java.util.jar.JarFile;
 
 /**
  * QuestEnginePlugin
- * - 메인 플러그인 엔트리
- * - 고성능 비동기 퀘스트 엔진
- * - Paper/Purpur 완전 대응
- * - GUI / 이벤트 / 명령 / 연동 통합
+ * - High-performance asynchronous quest engine
+ * - Fully compatible with Paper/Purpur/Folia
+ * - Supports automatic quest extraction from JAR (resources/quests/*.yml)
  */
 public final class QuestEnginePlugin extends JavaPlugin {
 
@@ -43,19 +48,33 @@ public final class QuestEnginePlugin extends JavaPlugin {
         long start = System.currentTimeMillis();
         getLogger().info("[QuestEngine] Initializing...");
 
+        // ------------------------------------------------------------
+        // Config + Messages
+        // ------------------------------------------------------------
         saveDefaultConfig();
-
-        // =============================================================
-        // 메시지 시스템
-        // =============================================================
         msg = new Msg(this);
 
-        // =============================================================
-        // 리포지토리 및 스레드풀 초기화
-        // =============================================================
-        quests = new QuestRepository(this, getConfig().getString("quests.folder", "quests"));
+        // ------------------------------------------------------------
+        // Repositories & folders
+        // ------------------------------------------------------------
+        File questDir = new File(getDataFolder(), getConfig().getString("quests.folder", "quests"));
+        if (!questDir.exists() && !questDir.mkdirs()) {
+            getLogger().warning("[QuestEngine] Failed to create quest folder: " + questDir.getAbsolutePath());
+        }
+
+        // 내부 JAR의 /quests/ 리소스를 외부로 복사
+        try {
+            copyDefaultQuests(questDir);
+        } catch (Exception e) {
+            getLogger().warning("[QuestEngine] Failed to extract default quests: " + e.getMessage());
+        }
+
+        quests = new QuestRepository(this, questDir);
         progress = new ProgressRepository(this);
 
+        // ------------------------------------------------------------
+        // Thread pool
+        // ------------------------------------------------------------
         asyncPool = Executors.newFixedThreadPool(
                 Math.max(2, Runtime.getRuntime().availableProcessors() / 2),
                 r -> {
@@ -64,15 +83,15 @@ public final class QuestEnginePlugin extends JavaPlugin {
                     return t;
                 });
 
-        // =============================================================
-        // 액션 실행기 및 엔진 생성
-        // =============================================================
+        // ------------------------------------------------------------
+        // Engine + Actions
+        // ------------------------------------------------------------
         actions = new ActionExecutor(this, msg);
         engine = new Engine(this, quests, progress, actions, msg, asyncPool);
 
-        // =============================================================
-        // 온라인 플레이어 캐시 프리로드
-        // =============================================================
+        // ------------------------------------------------------------
+        // Cache preload for online players
+        // ------------------------------------------------------------
         for (Player p : Bukkit.getOnlinePlayers()) {
             try {
                 progress.preload(p.getUniqueId());
@@ -82,9 +101,9 @@ public final class QuestEnginePlugin extends JavaPlugin {
             }
         }
 
-        // =============================================================
-        // 이벤트 등록 (Paper-safe)
-        // =============================================================
+        // ------------------------------------------------------------
+        // Register event listeners
+        // ------------------------------------------------------------
         Bukkit.getScheduler().runTask(this, () -> {
             try {
                 new EventDispatcher(this, engine);
@@ -95,34 +114,33 @@ public final class QuestEnginePlugin extends JavaPlugin {
             }
         });
 
-        // =============================================================
-        // 파티 플러그인 연동
-        // =============================================================
+        // ------------------------------------------------------------
+        // Party hooks
+        // ------------------------------------------------------------
         PartyHook.init(this, getConfig());
 
-        // =============================================================
-        // PlaceholderAPI 확장
-        // =============================================================
+        // ------------------------------------------------------------
+        // PlaceholderAPI
+        // ------------------------------------------------------------
         if (Bukkit.getPluginManager().isPluginEnabled("PlaceholderAPI")) {
             try {
                 new QuestPapiExpansion(this).register();
                 getLogger().info("[QuestEngine] PlaceholderAPI expansion registered.");
             } catch (Throwable t) {
-                t.printStackTrace();
                 getLogger().warning("[QuestEngine] PlaceholderAPI registration failed: " + t.getMessage());
             }
         }
 
-        // =============================================================
-        // 명령어 등록
-        // =============================================================
+        // ------------------------------------------------------------
+        // Commands
+        // ------------------------------------------------------------
         new QuestCommand(this);
         new QuestAdminCommand(this);
         new QuestEngineCommand(this);
 
-        // =============================================================
-        // GUI 매니저 초기화
-        // =============================================================
+        // ------------------------------------------------------------
+        // GUI
+        // ------------------------------------------------------------
         gui = new QuestGuiManager(this);
 
         long took = System.currentTimeMillis() - start;
@@ -139,16 +157,15 @@ public final class QuestEnginePlugin extends JavaPlugin {
             if (progress != null) progress.close();
             if (asyncPool != null && !asyncPool.isShutdown()) asyncPool.shutdownNow();
         } catch (Throwable t) {
-            t.printStackTrace();
             getLogger().warning("[QuestEngine] Exception during shutdown: " + t.getMessage());
         }
 
         getLogger().info("[QuestEngine] Disabled safely.");
     }
 
-    // =============================================================
-    // 접근자
-    // =============================================================
+    // ------------------------------------------------------------
+    // Accessors
+    // ------------------------------------------------------------
     public Engine engine() { return engine; }
     public QuestRepository quests() { return quests; }
     public ProgressRepository progress() { return progress; }
@@ -156,9 +173,9 @@ public final class QuestEnginePlugin extends JavaPlugin {
     public QuestGuiManager gui() { return gui; }
     public ExecutorService asyncPool() { return asyncPool; }
 
-    // =============================================================
-    // 간편 비동기 실행 유틸
-    // =============================================================
+    // ------------------------------------------------------------
+    // Async helper
+    // ------------------------------------------------------------
     public void runAsync(Runnable task) {
         if (asyncPool == null || asyncPool.isShutdown()) {
             getLogger().warning("[QuestEngine] Async pool not available, running sync.");
@@ -166,5 +183,42 @@ public final class QuestEnginePlugin extends JavaPlugin {
             return;
         }
         asyncPool.submit(task);
+    }
+
+    // ------------------------------------------------------------
+    // Quest Extraction from JAR
+    // ------------------------------------------------------------
+    private void copyDefaultQuests(File questDir) throws Exception {
+        File jarFile;
+        try {
+            jarFile = new File(getClass().getProtectionDomain().getCodeSource().getLocation().toURI());
+        } catch (URISyntaxException e) {
+            getLogger().warning("[QuestEngine] Could not locate plugin JAR.");
+            return;
+        }
+
+        try (JarFile jar = new JarFile(jarFile)) {
+            var entries = jar.entries();
+            while (entries.hasMoreElements()) {
+                JarEntry entry = entries.nextElement();
+                String name = entry.getName();
+                if (!name.startsWith("quests/") || !name.endsWith(".yml")) continue;
+
+                String fileName = name.substring("quests/".length());
+                File outFile = new File(questDir, fileName);
+
+                if (outFile.exists()) continue; // 이미 존재 시 스킵
+
+                try (InputStream in = jar.getInputStream(entry);
+                     FileOutputStream out = new FileOutputStream(outFile)) {
+                    byte[] buf = new byte[4096];
+                    int len;
+                    while ((len = in.read(buf)) > 0) out.write(buf, 0, len);
+                    getLogger().info("[QuestEngine] Extracted default quest: " + fileName);
+                } catch (Throwable t) {
+                    getLogger().warning("[QuestEngine] Failed to copy quest " + fileName + ": " + t.getMessage());
+                }
+            }
+        }
     }
 }

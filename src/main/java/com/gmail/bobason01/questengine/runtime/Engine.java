@@ -2,6 +2,7 @@ package com.gmail.bobason01.questengine.runtime;
 
 import com.gmail.bobason01.questengine.QuestEnginePlugin;
 import com.gmail.bobason01.questengine.action.ActionExecutor;
+import com.gmail.bobason01.questengine.progress.PlayerData;
 import com.gmail.bobason01.questengine.progress.ProgressRepository;
 import com.gmail.bobason01.questengine.quest.QuestDef;
 import com.gmail.bobason01.questengine.quest.QuestRepository;
@@ -11,6 +12,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.Event;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.player.AsyncPlayerChatEvent;
 import org.bukkit.event.player.PlayerCommandPreprocessEvent;
@@ -28,6 +30,9 @@ import java.util.function.Supplier;
  */
 public final class Engine {
 
+    private final Map<UUID, String> armedQuest = new ConcurrentHashMap<>();
+    private final Map<UUID, Long> armedUntil = new ConcurrentHashMap<>();
+    private static final long INTERACT_ARM_WINDOW_NANOS = 2_000_000_000L; // 2초
     private final QuestEnginePlugin plugin;
     private final QuestRepository quests;
     private final ProgressRepository progress;
@@ -35,6 +40,7 @@ public final class Engine {
     private final Msg msg;
     private final ExecutorService worker;
 
+    private final Map<UUID, Set<String>> interactArmed = new ConcurrentHashMap<>();
     private final Map<String, BoolCacheEntry> conditionCache = new ConcurrentHashMap<>(1024);
     private final Map<UUID, Object> playerLocks = new ConcurrentHashMap<>(256);
     private final Map<UUID, Map<String, Long>> recentEventWindow = new ConcurrentHashMap<>(256);
@@ -50,7 +56,7 @@ public final class Engine {
     }
 
     @FunctionalInterface
-    private interface TargetMatcher {
+    interface TargetMatcher {
         boolean test(Player p, Event e, String target);
     }
 
@@ -224,6 +230,76 @@ public final class Engine {
         }
     }
 
+    /**
+     * NPC/엔티티 우클릭 전용 두-번-클릭 플로우
+     * targetKey 예) "CITIZENS_1" 또는 "VILLAGER"
+     */
+    public void handleNpcInteract(Player p, String targetKey) {
+        if (p == null || targetKey == null || targetKey.isEmpty()) return;
+
+        // 이 퀘스트들만 조사
+        QuestDef[] list = quests.byEvent("ENTITY_INTERACT");
+        if (list.length == 0) return;
+
+        UUID uid = p.getUniqueId();
+        String name = p.getName();
+
+        // 같은 타깃으로 시작 가능한 퀘스트 찾기 (start_mode: PUBLIC|NPC)
+        QuestDef candidate = null;
+        for (QuestDef q : list) {
+            if (q == null) continue;
+            if (!(q.startMode == QuestDef.StartMode.PUBLIC || q.startMode == QuestDef.StartMode.NPC)) continue;
+
+            // 타깃 매칭: targets 비었으면 프리매치, 있으면 키 일치 필요
+            boolean matched = !q.hasTarget();
+            if (!matched) {
+                for (String t : q.targets) {
+                    if (t.equalsIgnoreCase(targetKey)) { matched = true; break; }
+                }
+            }
+            if (!matched) continue;
+
+            candidate = q;
+            break;
+        }
+        if (candidate == null) return;
+
+        // 두-번-클릭 윈도우 검사
+        long now = System.nanoTime();
+        String armed = armedQuest.get(uid);
+        Long until = armedUntil.get(uid);
+
+        // ① 이미 무장 상태이고 같은 퀘스트 & 아직 유효 → 성공 처리
+        if (armed != null && armed.equalsIgnoreCase(candidate.id) && until != null && until > now) {
+            // 활성 중일 때만 완료
+            if (progress.isActive(uid, name, candidate.id)) {
+                handleQuestCompleteOnMain(p, candidate);
+            } else {
+                // 혹시 중간에 취소/리셋됐다면 안전하게 시작 후 완료
+                progress.start(uid, name, candidate.id);
+                actions.runAll(candidate, "start", p);
+                handleQuestCompleteOnMain(p, candidate);
+            }
+            // 상태 해제
+            armedQuest.remove(uid);
+            armedUntil.remove(uid);
+            return;
+        }
+
+        // ② 아직 무장되지 않았거나 다른 퀘스트였다면: 시작만 수행하고 무장
+        if (!progress.isActive(uid, name, candidate.id)) {
+            progress.start(uid, name, candidate.id);
+            actions.runAll(candidate, "start", p);
+            p.sendMessage(msg.pref("quest_started").replace("%quest_name%", candidate.name));
+        } else {
+            // 이미 활성화되어 있는데 첫 클릭이면(= 무장 아님) 바로 무장만
+            // (혹시 다른 인터랙트로 활성화한 경우에도 동일하게 동작)
+        }
+
+        armedQuest.put(uid, candidate.id);
+        armedUntil.put(uid, now + INTERACT_ARM_WINDOW_NANOS);
+    }
+
     public void handle(Player p, String eventName, Event e) {
         if (p == null || eventName == null) return;
         QuestDef[] list = quests.byEvent(eventName);
@@ -240,21 +316,38 @@ public final class Engine {
         });
     }
 
-    public void handleCustom(Player p, String eventKey, Map<String, Object> ctx) {
-        if (p == null || eventKey == null) return;
-        QuestDef[] list = quests.byEvent(eventKey);
-        if (list.length == 0) return;
+    public void handleCustom(Player player, String eventKey, Map<String, Object> ctx) {
+        if (!eventKey.equalsIgnoreCase("ENTITY_INTERACT")) return;
 
-        UUID uid = p.getUniqueId();
-        if (isDedup(uid, eventKey)) return;
+        String target = String.valueOf(ctx.get("target_id"));
+        if (target == null || target.isEmpty()) return;
 
-        Object lock = playerLocks.computeIfAbsent(uid, k -> new Object());
-        worker.execute(() -> {
-            synchronized (lock) {
-                processCustomInternal(p, list, ctx);
+        for (QuestDef def : quests.byEvent(eventKey)) {
+            // start_mode 검사 (PUBLIC 또는 NPC 허용)
+            if (def.startMode != QuestDef.StartMode.PUBLIC && def.startMode != QuestDef.StartMode.NPC)
+                continue;
+
+            // 타깃 일치 확인
+            if (!def.matchesTarget(target)) continue;
+
+            PlayerData data = progress.get(player.getUniqueId());
+
+            // 아직 시작 안했으면 시작
+            if (!data.isActive(def.id) && !data.isCompleted(def.id)) {
+                startQuest(player, def.id);
+                return;
             }
-        });
+
+            // 이미 진행 중이면 완료 처리
+            if (data.isActive(def.id) && !data.isCompleted(def.id)) {
+                completeQuest(player, def.id);
+                return;
+            }
+
+            // 이미 완료된 경우는 무시
+        }
     }
+
 
     public void handleDynamic(Player p, String key, Object val) {
         if (p == null || key == null) return;
@@ -265,48 +358,79 @@ public final class Engine {
 
     public void handleDynamic(Event e) {
         if (e == null) return;
-        Player target = EventContextMapper.extractPlayer(e);
-        if (target == null) return;
 
-        String eventKey = e.getClass().getSimpleName().toUpperCase(Locale.ROOT);
+        // 플레이어 탐지
+        Player p = EventContextMapper.extractPlayer(e);
+        if (p == null) {
+            if (e instanceof EntityDeathEvent de && de.getEntity().getKiller() != null)
+                p = de.getEntity().getKiller();
+            else if (e instanceof EntityDamageByEntityEvent hit && hit.getDamager() instanceof Player dp)
+                p = dp;
+        }
+        if (p == null) return;
+
+        // 이벤트 키 정규화 (ex: BlockBreakEvent → BLOCK_BREAK)
+        String eventKey = e.getClass().getSimpleName()
+                .replace("Event", "")
+                .replace("MythicMob", "MYTHICMOBS_")
+                .replace("Player", "PLAYER_")
+                .replace("Entity", "ENTITY_")
+                .replace("Block", "BLOCK_")
+                .replace("Inventory", "INVENTORY_")
+                .replace("Item", "ITEM_")
+                .toUpperCase(Locale.ROOT);
+
+        switch (eventKey) {
+            case "PLAYER_INTERACT_ENTITY" -> eventKey = "ENTITY_INTERACT";   // Citizens, MythicMobs 등 NPC 클릭
+            case "PLAYER_INTERACT" -> eventKey = "BLOCK_INTERACT";            // 블록 클릭류 통합
+            case "PLAYER_DROP_ITEM" -> eventKey = "ITEM_DROP";                // 아이템 드롭
+            case "PLAYER_PICKUP_ITEM" -> eventKey = "ITEM_PICKUP";            // 아이템 줍기
+            case "ENTITY_DEATH" -> eventKey = "MOBKILLING";                   // 퀘스트 호환용
+        }
+
+        // 퀘스트 매칭
         QuestDef[] list = quests.byEvent(eventKey);
         if (list.length == 0) return;
 
-        UUID uid = target.getUniqueId();
+        UUID uid = p.getUniqueId();
         if (isDedup(uid, eventKey)) return;
 
+        // 컨텍스트 빌드
+        Map<String, Object> ctx = EventContextMapper.map(e);
         Object lock = playerLocks.computeIfAbsent(uid, k -> new Object());
+
+        // 비동기 처리
+        Player finalP = p;
         worker.execute(() -> {
             synchronized (lock) {
-                Map<String, Object> ctx = EventContextMapper.map(e);
                 List<Runnable> pending = new ArrayList<>(4);
 
                 for (QuestDef q : list) {
                     if (q == null) continue;
-                    if (!progress.isActive(uid, target.getName(), q.id)) continue;
+                    if (!progress.isActive(uid, finalP.getName(), q.id)) continue;
 
                     boolean fail = false;
                     for (String cond : q.condFail) {
-                        if (cachedEval(target, e, ctx, cond)) { fail = true; break; }
+                        if (cachedEval(finalP, e, ctx, cond)) { fail = true; break; }
                     }
                     if (fail) {
                         final String qid = q.id;
                         pending.add(() -> {
-                            actions.runAll(q, "fail", target);
-                            progress.cancel(uid, target.getName(), qid);
+                            actions.runAll(q, "fail", finalP);
+                            progress.cancel(uid, finalP.getName(), qid);
                         });
                         continue;
                     }
 
                     boolean ok = true;
                     for (String cond : q.condSuccess) {
-                        if (!cachedEval(target, e, ctx, cond)) { ok = false; break; }
+                        if (!cachedEval(finalP, e, ctx, cond)) { ok = false; break; }
                     }
                     if (!ok) continue;
 
-                    int val = progress.addProgress(uid, target.getName(), q.id, 1);
+                    int val = progress.addProgress(uid, finalP.getName(), q.id, 1);
                     if (val >= q.amount) {
-                        pending.add(() -> handleQuestCompleteOnMain(target, q));
+                        pending.add(() -> handleQuestCompleteOnMain(finalP, q));
                     }
                 }
 
@@ -321,11 +445,23 @@ public final class Engine {
         });
     }
 
+    private boolean markArmed(UUID uid, String qid) {
+        return interactArmed.computeIfAbsent(uid, k -> ConcurrentHashMap.newKeySet()).add(qid);
+    }
+
+    private boolean consumeArmed(UUID uid, String qid) {
+        Set<String> set = interactArmed.get(uid);
+        if (set == null) return false;
+        boolean had = set.remove(qid);
+        if (set.isEmpty()) interactArmed.remove(uid);
+        return had;
+    }
+
     private void processEventInternal(Player p, String eventName, Event e, QuestDef[] list) {
         UUID uid = p.getUniqueId();
         String name = p.getName();
 
-        boolean isInteractComplete = "ENTITY_INTERACT".equalsIgnoreCase(eventName);
+        boolean isInteract = "ENTITY_INTERACT".equalsIgnoreCase(eventName);
 
         TargetMatcher matcher = matchers.get(eventName.toLowerCase(Locale.ROOT));
         if (matcher == null) matcher = matchers.getOrDefault("*", (pp, ee, t) -> true);
@@ -335,7 +471,29 @@ public final class Engine {
         for (QuestDef q : list) {
             if (q == null) continue;
 
-            if (!progress.isActive(uid, name, q.id)) continue;
+            boolean active = progress.isActive(uid, name, q.id);
+
+            // [1] ENTITY_INTERACT + 아직 시작 안함 → 첫 클릭 (start)
+            if (isInteract && !active && (q.startMode == QuestDef.StartMode.PUBLIC || q.startMode == QuestDef.StartMode.NPC)) {
+                boolean matched = !q.hasTarget();
+                if (!matched) {
+                    for (String t : q.targets) {
+                        if (matcher.test(p, e, t)) { matched = true; break; }
+                    }
+                }
+                if (!matched) continue;
+
+                // 첫 클릭: 퀘스트 시작 + 무장 상태 설정
+                pending.add(() -> {
+                    actions.runAll(q, "start", p);
+                    progress.start(uid, name, q.id);
+                    markArmed(uid, q.id);
+                });
+                continue;
+            }
+
+            // [2] 일반 진행 중 퀘스트
+            if (!active) continue;
 
             boolean matched = !q.hasTarget();
             if (!matched) {
@@ -345,6 +503,7 @@ public final class Engine {
             }
             if (!matched) continue;
 
+            // 실패 조건
             boolean fail = false;
             for (String cond : q.condFail) {
                 if (cachedEval(p, e, null, cond)) { fail = true; break; }
@@ -358,17 +517,22 @@ public final class Engine {
                 continue;
             }
 
+            // 성공 조건
             boolean ok = true;
             for (String cond : q.condSuccess) {
                 if (!cachedEval(p, e, null, cond)) { ok = false; break; }
             }
             if (!ok) continue;
 
-            if (isInteractComplete) {
-                pending.add(() -> handleQuestCompleteOnMain(p, q));
+            // [3] 두 번째 클릭 시 (armed 상태면 즉시 완료)
+            if (isInteract) {
+                if (consumeArmed(uid, q.id)) {
+                    pending.add(() -> handleQuestCompleteOnMain(p, q));
+                }
                 continue;
             }
 
+            // [4] 누적형 이벤트 (ex: BLOCK_BREAK)
             int val = progress.addProgress(uid, name, q.id, 1);
             if (val >= q.amount) {
                 pending.add(() -> handleQuestCompleteOnMain(p, q));
@@ -538,6 +702,8 @@ public final class Engine {
             return tokenAnyMatch(de.getEntity().getType().name(), t);
         });
 
+        matchers.put("entity_interact", TargetMatchers.ENTITY_INTERACT_MATCHER);
+
         matchers.put("player_command", (p, e, t) -> {
             if (!(e instanceof PlayerCommandPreprocessEvent ce)) return false;
             if (t == null || t.isEmpty()) return true;
@@ -622,5 +788,25 @@ public final class Engine {
         LocalDateTime next = now.withHour(h).withMinute(m).withSecond(0).withNano(0);
         if (!next.isAfter(now)) next = next.plusDays(1);
         return Duration.between(now, next).toMillis();
+    }
+    public void completeQuest(Player player, String questId) {
+        QuestDef def = quests.byId(questId);
+        if (def == null) return;
+
+        PlayerData data = progress.get(player.getUniqueId());
+        if (data == null || !data.isActive(questId)) return;
+
+        data.complete(questId, def.points);
+        progress.save(data);
+
+        actions.run(def, "success", player); // ← runAll 기반 헬퍼 호출
+
+        if (def.nextQuestOnComplete != null && !def.nextQuestOnComplete.isEmpty()) {
+            QuestDef next = quests.byId(def.nextQuestOnComplete);
+            if (next != null) startQuest(player, next.id);
+        }
+
+        player.sendMessage(msg.pref("quest_completed")
+                .replace("%quest_name%", def.name));
     }
 }

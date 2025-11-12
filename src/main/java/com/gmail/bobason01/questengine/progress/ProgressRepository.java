@@ -289,4 +289,16 @@ public final class ProgressRepository {
                 .limit(limit)
                 .collect(Collectors.toList());
     }
+    public List<String> listActiveIds(UUID uid, String playerName) {
+        if (uid == null) return List.of();
+        return of(uid, playerName).activeIds();
+    }
+    public PlayerData get(UUID id) {
+        return cache.computeIfAbsent(id, k -> storage.load(k, "unknown"));
+    }
+    public void save(PlayerData data) {
+        if (data == null) return;
+        storage.save(data);
+        cache.put(data.getId(), data);
+    }
 }

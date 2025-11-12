@@ -1,0 +1,60 @@
+name: "Template Quest"
+id: template_quest
+event: BLOCK_BREAK
+targets:
+  - STONE
+amount: 10
+points: 5
+repeat: 0
+public: false
+party: false
+type: vanilla
+start_mode: AUTO
+
+reset:
+  policy: DAILY
+  time: "04:00"
+
+display:
+  title: "&aTemplate Quest Title"
+  description:
+    - "&7Break 10 stones to test all features."
+    - "&eThis is a sample quest file."
+  progress: "&fProgress: &a%value%/%target%"
+  reward: "&eReward: 100 Coins"
+  category: "&6General"
+  difficulty: "&aEasy"
+  icon: DIAMOND_PICKAXE
+  hint: "&7Try mining around the spawn area."
+  customModelData: 12345
+
+conditions:
+  start:
+    - "%player_level% >= 1"
+  success:
+    - "%block_type% == STONE"
+  fail:
+    - "%world_name% == nether"
+
+actions:
+  start:
+    - msg{t="&7Quest started: &aMine 10 stones!"} @self
+  success:
+    - msg{t="&aYou completed the mining quest!"} @self
+    - command{c="eco give %player% 100"} @server
+  cancel:
+    - msg{t="&cQuest canceled."} @self
+  fail:
+    - msg{t="&cQuest failed because you went to the Nether."} @self
+  next:
+    - command{c="quest start next_quest"} @self
+
+chain:
+  next: next_quest
+
+custom_event_data:
+  event: org.bukkit.event.player.PlayerToggleSneakEvent
+  player_variable: getPlayer()
+  variables_to_capture:
+    - "%is_sneaking%;isSneaking()"
+    - "%world%;getPlayer().getWorld().getName()"

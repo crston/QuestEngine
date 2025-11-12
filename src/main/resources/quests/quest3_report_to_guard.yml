@@ -1,0 +1,24 @@
+name: "Report to the Guard Captain"
+id: report_to_guard
+event: ENTITY_INTERACT
+targets:
+  - CITIZENS_2
+amount: 1
+points: 2
+start_mode: NPC
+
+display:
+  title: "&bReport to the Guard Captain"
+  description:
+    - "&7Find the Guard Captain and report your success."
+  reward: "&eReward: 25 Coins"
+
+actions:
+  start:
+    - msg{t="&7Find the Guard Captain near the barracks."} @self
+  success:
+    - msg{t="&aCaptain: Well done, recruit. You’re ready for the ceremony."} @self
+    - command{c="eco give %player% 25"} @server
+
+chain:
+  next: hero_ceremony

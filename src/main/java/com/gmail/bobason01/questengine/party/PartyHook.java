@@ -75,34 +75,50 @@ public final class PartyHook {
     // ==============================
     private static PartyAdapter mythicDungeons() {
         try {
-            Class<?> api = Class.forName("net.elseland.xikage.mythicdungeons.api.MythicDungeonsAPI");
-            mythic_getParty = api.getMethod("getParty", UUID.class);
-            Class<?> partyCls = Class.forName("net.elseland.xikage.mythicdungeons.api.model.Party");
-            mythic_getMembers = partyCls.getMethod("getOnlineMembers");
+            // 클래스 참조
+            Class<?> mythicDungeonsCls = Class.forName("net.playavalon.mythicdungeons.MythicDungeons");
+            Class<?> mythicPlayerCls = Class.forName("net.playavalon.mythicdungeons.player.MythicPlayer");
+            Class<?> mythicPartyCls = Class.forName("net.playavalon.mythicdungeons.player.party.partysystem.MythicParty");
+
+            // 메서드 캐시
+            Method inst = mythicDungeonsCls.getMethod("inst");
+            Method getMythicPlayer = mythicDungeonsCls.getMethod("getMythicPlayer", org.bukkit.entity.Player.class);
+            Method getMythicParty = mythicPlayerCls.getMethod("getMythicParty");
+            Method getMythicPlayers = mythicPartyCls.getMethod("getMythicPlayers");
+            Method getPlayer = mythicPlayerCls.getMethod("getPlayer");
+
             return new PartyAdapter() {
                 @Override
-                public boolean available() { return true; }
+                public boolean available() {
+                    return true;
+                }
 
                 @SuppressWarnings("unchecked")
                 @Override
                 public Collection<Player> members(Player p) {
                     try {
-                        Object party = mythic_getParty.invoke(null, p.getUniqueId());
+                        Object api = inst.invoke(null);
+                        Object mythicPlayer = getMythicPlayer.invoke(api, p);
+                        if (mythicPlayer == null) return Collections.singletonList(p);
+
+                        Object party = getMythicParty.invoke(mythicPlayer);
                         if (party == null) return Collections.singletonList(p);
-                        Collection<UUID> uuids = (Collection<UUID>) mythic_getMembers.invoke(party);
-                        List<Player> list = new ArrayList<>(uuids.size());
-                        for (UUID id : uuids) {
-                            Player pl = Bukkit.getPlayer(id);
+
+                        Collection<Object> mythicPlayers = (Collection<Object>) getMythicPlayers.invoke(party);
+                        List<Player> list = new ArrayList<>(mythicPlayers.size());
+                        for (Object mp : mythicPlayers) {
+                            Player pl = (Player) getPlayer.invoke(mp);
                             if (pl != null && pl.isOnline()) list.add(pl);
                         }
                         return list.isEmpty() ? Collections.singletonList(p) : list;
-                    } catch (Throwable t) {
+                    } catch (Throwable ex) {
+                        ex.printStackTrace();
                         return Collections.singletonList(p);
                     }
                 }
             };
         } catch (Throwable t) {
-            Bukkit.getLogger().warning("[QuestEngine] MythicDungeons hook failed: " + t.getMessage());
+            Bukkit.getLogger().warning("[QuestEngine] MythicDungeons (new API) hook failed: " + t.getMessage());
             return PartyAdapter.EMPTY;
         }
     }

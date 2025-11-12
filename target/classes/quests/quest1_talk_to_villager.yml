@@ -1,0 +1,25 @@
+name: "Talk to the Villager"
+id: talk_to_villager
+event: ENTITY_INTERACT
+targets:
+  - CITIZENS_1
+amount: 1
+points: 1
+public: true
+start_mode: PUBLIC
+
+display:
+  title: "&eTalk to the Villager"
+  description:
+    - "&7Speak with the villager near the fountain."
+  reward: "&eReward: 10 Coins"
+
+actions:
+  start:
+    - msg{t="&7A villager wants to talk to you."} @self
+  success:
+    - msg{t="&aVillager: Please defeat the slimes near our farm!"} @self
+    - command{c="eco give %player% 10"} @server
+
+chain:
+  next: kill_slimes
