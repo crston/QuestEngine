@@ -1,137 +1,362 @@
 prefix: "&7[&aQuestEngine&7] "
 
 vault_missing: "&cVault 플러그인을 찾을 수 없습니다. 일부 기능이 비활성화됩니다."
-quest_already_active: "&c이미 진행 중인 퀘스트입니다."
+quest_already_active: "&c이미 해당 퀘스트를 진행 중입니다."
 quest_started: "&a'%quest_name%' 퀘스트를 시작했습니다!"
-quest_not_active: "&c현재 진행 중인 퀘스트가 아닙니다."
+quest_not_active: "&c현재 해당 퀘스트를 진행 중이 아닙니다."
 quest_canceled: "&e'%quest_name%' 퀘스트를 취소했습니다."
-quest_stopped: "&7'%quest_name%' 퀘스트가 강제로 중단되었습니다."
-abandon_all_done: "&7모든 진행 중인 퀘스트를 포기했습니다."
+quest_stopped: "&7'%quest_name%' 퀘스트가 강제로 중지되었습니다."
+abandon_all_done: "&7모든 활성 퀘스트가 포기되었습니다."
 list_empty: "&7진행 중인 퀘스트가 없습니다."
-list_header: "&a===== &f진행 중인 퀘스트 목록 &a====="
+list_header: "&a===== &f활성 퀘스트 목록 &a====="
 list_line: "&f- &a%quest_name% &7(&e%value% / %target%&7)"
-quest_completed: "&6'%quest_name%' 퀘스트 완료! 보상을 획득했습니다!"
-reload_done: "&a퀘스트 설정을 다시 불러왔습니다."
+quest_completed: "&6'%quest_name%' 퀘스트 완료! 보상을 받았습니다!"
+reload_done: "&a퀘스트 설정이 성공적으로 리로드되었습니다."
 invalid_args: "&c잘못된 명령어 인자입니다."
 player_only: "&c이 명령어는 플레이어만 사용할 수 있습니다."
-quest_repeat_ready: "&6'%quest_name%' 퀘스트를 다시 시작할 수 있습니다. /quest start %quest_id% 로 재도전하세요!"
-quest_no_repeat: "&c이미 완료한 퀘스트입니다. 다시 수행할 수 없습니다."
+quest_repeat_ready: "&6'%quest_name%' 퀘스트가 다시 가능해졌습니다. /quest start %quest_id% 로 다시 시작하세요!"
+quest_no_repeat: "&c이 퀘스트는 이미 완료해서 다시 진행할 수 없습니다."
 
 # ==========================================================
-# 퀘스트 보드 및 연계 퀘스트
+# QUEST BOARD & CHAIN SYSTEM
 # ==========================================================
-quest_board_only: "&7이 퀘스트는 퀘스트 보드에서만 수락할 수 있습니다."
-quest_board_repeat: "&e'%quest_name%' 퀘스트를 완료했습니다.&7 다시 진행하려면 퀘스트 보드에서 다시 수락하세요."
-quest_chain: "&a'%current%' 퀘스트를 완료했습니다. 다음 퀘스트 &e'%next%'&a 가 시작됩니다."
-quest_chain_board: "&a'%current%' 퀘스트를 완료했습니다. 다음 퀘스트 &e'%next%'&a 가 퀘스트 보드에 갱신되었습니다."
-quest_chain_end: "&a연계된 모든 퀘스트를 완료했습니다!"
+quest_board_only: "&7이 퀘스트는 퀘스트 게시판에서만 수락할 수 있습니다."
+quest_board_repeat: "&e'%quest_name%' 퀘스트를 완료했습니다.&7 다시 진행하려면 퀘스트 게시판에서 수락하세요."
+quest_chain: "&a'%current%'을(를) 완료했습니다. 다음 퀘스트 시작: &e%next%&a."
+quest_chain_board: "&a'%current%'을(를) 완료했습니다. 다음 퀘스트 &e%next%&a 가 퀘스트 게시판에서 이용 가능합니다."
+quest_chain_end: "&a모든 연계 퀘스트를 완료했습니다."
 
 # ==========================================================
-# 관리자(Admin)
+# ADMIN
 # ==========================================================
 admin:
   usage: "&7/questadmin <reload|give|complete|stop|reset|list>"
-  reloaded: "&a모든 퀘스트를 새로고침했습니다!"
+  reloaded: "&a모든 퀘스트가 성공적으로 리로드되었습니다!"
   invalid_args: "&c잘못된 인자입니다!"
   offline: "&c해당 플레이어는 오프라인입니다!"
-  started: "&a%quest_name% 퀘스트를 시작했습니다!"
-  stopped: "&c%quest_name% 퀘스트를 중단했습니다!"
-  completed: "&b%quest_name% 퀘스트를 완료 처리했습니다!"
-  reset_done: "&e%quest_name% 퀘스트 진행도가 초기화되었습니다!"
-  list_header: "&6==== %player% 님의 퀘스트 목록 ===="
-  no_active: "&7진행 중인 퀘스트가 없습니다."
+  started: "&a퀘스트 시작됨: %quest_name%"
+  stopped: "&c퀘스트 중지됨: %quest_name%"
+  completed: "&b퀘스트 강제 완료됨: %quest_name%"
+  reset_done: "&e퀘스트 진행도 초기화: %quest_name%"
+  list_header: "&6==== %player% 님의 퀘스트 ===="
+  no_active: "&7활성 퀘스트가 없습니다."
 
 # ==========================================================
-# 퀘스트 목록 출력
+# QUEST LIST
 # ==========================================================
 list:
   empty: "&7진행 중인 퀘스트가 없습니다."
-  header: "&e[진행 중인 퀘스트 목록]"
+  header: "&e[활성 퀘스트 목록]"
   title: "&e%title% &7(%value%/%target%)"
   desc: " &7- %desc%"
   progress: "&f진행도 %bar% &7(%percent%%)"
   reward: "&6보상 %reward%"
-  points: "&f당신의 퀘스트 포인트: &a%points%"
+  points: "&f보유 퀘스트 포인트: &a%points%"
 
 # ==========================================================
 # GUI
 # ==========================================================
 gui:
   title:
-    list: "&a진행 중인 퀘스트"
-    public: "&b퀘스트 보드"
-    leaderboard: "&6리더보드"
-
+    list: "&a내 퀘스트"
+    public: "&b퀘스트 게시판"
+    leaderboard: "&6랭킹"
   lore:
     list:
       - "&7%quest_title%"
       - "&a진행도: &f%value%/%target%"
       - "&e보상: &f%reward%"
-
   confirm:
     title: "&c퀘스트 취소 확인: %quest%"
-    yes_lore: "&7정말 '%quest%' 퀘스트를 취소하시겠습니까?"
-    no_lore: "&7아니오, 돌아갑니다."
+    yes_lore: "&7'%quest%' 퀘스트를 정말 취소하시겠습니까?"
+    no_lore: "&7아니요, 돌아가기"
     cancel_done: "&e'%quest%' 퀘스트가 취소되었습니다."
-
-  # ------------------------------
-  # 개인 퀘스트 목록 (QuestListMenu)
-  # ------------------------------
   list:
     title: "&b퀘스트 목록 &7| &f페이지 %page%"
     search: "&f🔍 검색"
-    search_lore: "&7클릭하여 검색어를 입력합니다"
-    search_prompt: "검색어를 입력하세요 (빈칸=전체 보기)"
-    leaderboard: "&6🏆 리더보드"
-    leaderboard_lore: "&7클릭하여 퀘스트 순위를 확인합니다"
-    public: "&b📖 퀘스트 보드"
-    public_lore: "&7클릭하여 퀘스트 보드를 엽니다"
+    search_lore: "&7검색어 입력창 열기"
+    search_prompt: "검색어를 입력하세요 (비워두면 전체)"
+    leaderboard: "&6🏆 랭킹"
+    leaderboard_lore: "&7퀘스트 랭킹 보기"
+    public: "&b📖 게시판"
+    public_lore: "&7퀘스트 게시판 열기"
     sort: "&f정렬: &e%order%"
-    sort_lore: "&7클릭하여 정렬 순서를 변경합니다"
+    sort_lore: "&7정렬 방식 변경"
     order_asc: "오름차순"
     order_desc: "내림차순"
     prev: "&f이전 페이지"
     next: "&f다음 페이지"
     page_input: "&f페이지 이동"
-    page_input_lore: "&7클릭 후 페이지 번호를 입력합니다"
-    page_input_prompt: "이동할 페이지 번호를 입력하세요"
-    left_click_start: "&a좌클릭: 퀘스트 수락"
-    left_click_complete: "&a좌클릭: 퀘스트 완료 시도"
+    page_input_lore: "&7클릭 후 이동할 페이지 번호 입력"
+    page_input_prompt: "이동할 페이지 번호 입력"
+    left_click_start: "&a좌클릭: 퀘스트 시작"
     right_click_cancel: "&c우클릭: 퀘스트 취소"
     quest_completed: "&a퀘스트 완료: &f%quest%"
-    quest_cancelled: "&7퀘스트 취소: &f%quest%"
-    quest_cannot_complete: "&c조건이 충족되지 않아 완료할 수 없습니다."
-    quest_complete_error: "&c퀘스트 완료 처리 중 오류가 발생했습니다."
-    method_missing: "&c완료 처리 메서드를 찾지 못했습니다."
-
-  # ------------------------------
-  # 퀘스트 보드 (PublicQuestMenu)
-  # ------------------------------
+    quest_cancelled: "&7퀘스트 취소됨: &f%quest%"
+    quest_cannot_complete: "&c완료 조건을 충족하지 못했습니다."
+    quest_complete_error: "&c퀘스트 완료 중 오류 발생."
+    method_missing: "&c완료 메서드를 찾을 수 없습니다."
   public:
-    title: "&b퀘스트 보드 | &f페이지 %page%"
+    title: "&b퀘스트 게시판 | &f페이지 %page%"
     back: "&f← 내 퀘스트로 돌아가기"
-    back_lore: "&7클릭하여 개인 퀘스트 목록으로 이동합니다"
+    back_lore: "&7클릭하여 내 퀘스트로 이동"
     search: "&f🔍 검색"
-    search_lore: "&7클릭하여 퀘스트 보드 검색어를 입력합니다"
-    search_prompt: "검색어를 입력하세요 (빈칸=전체 보기)"
+    search_lore: "&7퀘스트 이름 검색"
+    search_prompt: "검색어를 입력하세요 (비워두면 전체)"
     prev: "&f이전 페이지"
-    prev_lore: "&7클릭하여 이전 페이지로 이동합니다"
+    prev_lore: "&7이전 페이지로 이동"
     next: "&f다음 페이지"
-    next_lore: "&7클릭하여 다음 페이지로 이동합니다"
+    next_lore: "&7다음 페이지로 이동"
     accept_lore: "&a좌클릭: 퀘스트 수락"
     cancel_lore: "&c우클릭: 퀘스트 취소"
     accepted: "&a'%quest%' 퀘스트를 수락했습니다!"
     cancelled: "&e'%quest%' 퀘스트를 취소했습니다."
-    error_accept: "&c퀘스트 수락 중 오류가 발생했습니다."
+    error_accept: "&c퀘스트 수락 중 오류 발생!"
     reward_label: "&e보상: &f"
     left_click_start: "&a좌클릭: 퀘스트 수락"
-  # ------------------------------
-  # 리더보드 (LeaderboardMenu)
-  # ------------------------------
   leaderboard:
-    title: "&6퀘스트 리더보드"
-    back: "&f← 내 퀘스트로 돌아가기"
-    back_lore: "&7클릭 시 개인 퀘스트 목록으로 이동합니다"
-    rank_format: "&e#%rank% &f%player% &7- &a%points%점"
+    title: "&6퀘스트 랭킹"
+    back: "&f← 내 퀘스트"
+    back_lore: "&7내 퀘스트 목록으로 이동"
+    rank_format: "&e#%rank% &f%player% &7- &a%points% 포인트"
     rank_points: "&7포인트: &f%points%"
     no_data: "&7표시할 데이터가 없습니다."
+
+  # ==========================================================
+  # QUEST EDITOR GUI (한국어)
+  # ==========================================================
+  editor:
+    title:
+      main: "&9퀘스트 에디터 - %tab%"
+      main.prefix: "퀘스트 에디터 -"
+      list: "&9리스트 편집 - %key%"
+      list.prefix: "리스트 편집 -"
+      event: "&9이벤트 선택 %page%/%max%"
+      event.prefix: "이벤트 선택"
+      captures: "&9캡처 편집"
+      captures.prefix: "캡처 편집"
+    tab:
+      selected: "&b%name%"
+      normal: "&e%name%"
+      lore:
+        current: "&7현재 탭"
+        switch: "&7클릭하여 이동"
+      display: "DISPLAY"
+      event: "EVENT"
+      custom_event: "CUSTOM EVENT"
+      targets: "TARGETS"
+      meta: "META"
+      actions: "ACTIONS"
+      conditions: "CONDITIONS"
+      options: "OPTIONS"
+      chain: "CHAIN"
+    common:
+      empty: "(비어있음)"
+      text:
+        name: "&6%label%"
+        value: "&f%value%"
+        left: "&e좌클릭: 편집"
+        right: "&c우클릭: 초기화"
+      number:
+        name: "&6%label%"
+        value: "&f%value%"
+        edit: "&e좌클릭: 숫자 입력"
+      boolean:
+        name: "&6%label%"
+        value: "&f%value%"
+        edit: "&e좌클릭: 토글"
+      list:
+        name: "&6%label%"
+        entries: "&7항목 수: %count%"
+        edit: "&e클릭하여 리스트 편집"
+    display:
+      title:
+        label: "표시 제목"
+      description:
+        label: "설명"
+      progress:
+        label: "진행도 형식"
+      cmd:
+        label: "CustomModelData"
+      hint:
+        label: "힌트"
+      reward:
+        label: "보상 설명"
+      category:
+        label: "카테고리"
+      difficulty:
+        label: "난이도"
+      icon:
+        name: "&6표시 아이콘"
+        value: "&b아이템: %value%"
+        left: "&e좌클릭: 직접 입력"
+        right: "&c우클릭: BOOK 으로 초기화"
+        inv: "&a이 탭을 연 상태에서 인벤토리의 아이템을 클릭하면 적용됩니다."
+        help:
+          title: "&b표시 아이콘 도움말"
+          help1: "&7이 탭을 열고"
+          help2: "&7인벤토리 아이템을 클릭하면 아이콘으로 설정됩니다."
+          help3: "&7CustomModelData 는 자동 복사됩니다."
+          help4: "&7없으면 기본값으로 설정됩니다."
+    event:
+      event:
+        label: "이벤트"
+      startmode:
+        label: "시작 모드"
+      type:
+        label: "퀘스트 타입"
+      help:
+        title: "&b이벤트 도움말"
+        help1: "&7좌클릭: 직접 이벤트 이름 입력"
+        help2: "&7Shift+좌클릭: 이벤트 목록 열기"
+        help3: "&7우클릭: CUSTOM 으로 초기화"
+      entry:
+        name: "&6%event%"
+        lore1: "&7이 이벤트 사용"
+        lore2: "&e클릭하여 적용"
+      prev:
+        name: "&e이전 페이지"
+        lore: "&7페이지 %page%"
+      next:
+        name: "&e다음 페이지"
+        lore: "&7페이지 %page%"
+      back:
+        name: "&c뒤로"
+        lore: "&7에디터로 돌아가기"
+    custom:
+      eventclass:
+        label: "이벤트 클래스"
+      playergetter:
+        label: "플레이어 Getter"
+      captures:
+        label: "&b캡처 목록"
+        entries: "&7개수: %count%"
+        left: "&e좌클릭: 편집"
+        right: "&c우클릭: 전체 삭제"
+        format: "&f%key%;%chain%"
+    captures:
+      entry:
+        name: "&f%key%"
+        chain: "&f%chain%"
+        left: "&e좌클릭: 수정"
+        right: "&c우클릭: 삭제"
+      add:
+        name: "&a캡처 추가"
+        lore1: "&7예: %block_type%;getBlock().getType().name()"
+        lore2: "&a좌클릭하여 추가"
+      back:
+        name: "&e뒤로"
+        lore: "&7에디터로 돌아가기"
+    targets:
+      targets:
+        label: "타겟"
+      amount:
+        label: "필요 개수"
+      repeat:
+        label: "반복"
+      points:
+        label: "포인트"
+    meta:
+      id:
+        label: "퀘스트 ID"
+      name:
+        label: "퀘스트 이름"
+    actions:
+      group:
+        accept: "ACCEPT"
+        start: "START"
+        success: "SUCCESS"
+        fail: "FAIL"
+        cancel: "CANCEL"
+        stop: "STOP"
+        restart: "RESTART"
+        repeat: "REPEAT"
+      lines: "&b줄 수: %count%"
+      left: "&e좌클릭: 액션 편집"
+      right: "&c우클릭: 초기화"
+      help:
+        title: "&b액션 예시"
+        help1: "&7msg{m=Hello} @self"
+        help2: "&7cmd{c=give %player% diamond 1} @server"
+        help3: "&7item{i=DIAMOND;a=5}"
+        help4: "&7delay 10"
+    conditions:
+      help:
+        title: "&b조건 도움말"
+        help1: "&7PAPI 또는 캡처 변수 사용 가능."
+        help2: "&f%player_level% >= 10 &7→ 플레이어 레벨 10 이상일 때 통과"
+        help3: "&f%player_health% < 5 &7→ 체력 5 미만일 때 통과"
+        help4: "&f%block_type% == DIAMOND_ORE &7→ 블록 타입이 일치할 때"
+        help5: "&7AND / OR 로 조건 조합 가능"
+      start:
+        label: "시작 조건"
+      success:
+        label: "완료 조건"
+      fail:
+        label: "실패 조건"
+    options:
+      help:
+        title: "&b옵션 도움말"
+        help1: "&7resetPolicy 예시:"
+        help2: "&fDAILY &7→ 매일 초기화"
+        help3: "&fWEEKLY &7→ 매주 초기화"
+        help4: "&fNONE &7→ 초기화 없음"
+        help5: "&7resetTime 예:"
+        help6: "&f04:00 &7→ 매일 4시"
+        help7: "&f21:30 &7→ 21:30 초기화"
+        help8: "&724시간 형식 (HH:MM)"
+      resetpolicy:
+        label: "리셋 정책"
+      resettime:
+        label: "리셋 시간"
+      public:
+        label: "공개 퀘스트"
+      party:
+        label: "파티 퀘스트"
+    chain:
+      next:
+        label: "다음 퀘스트"
+    list:
+      add:
+        name: "&a항목 추가"
+        lore1: "&7좌클릭: 새 항목 추가"
+    control:
+      save:
+        name: "&a저장"
+        lore1: "&7퀘스트 파일에 저장"
+        lore2: "&7리포지토리 자동 리로드"
+      close:
+        name: "&c닫기"
+        lore: "&7에디터 종료"
+    prompt:
+      display_title: "&e표시 제목 입력:"
+      display_icon: "&e아이콘 재질 입력:"
+      display_progress: "&e진행도 형식 입력:"
+      display_cmd: "&eCustomModelData 입력 (-1 = 없음):"
+      display_hint: "&e힌트 입력:"
+      display_reward: "&e보상 설명 입력:"
+      display_category: "&e카테고리 입력:"
+      display_difficulty: "&e난이도 입력:"
+      event_name: "&e이벤트 이름 입력:"
+      event_type: "&e퀘스트 타입 입력:"
+      custom_event_class: "&e커스텀 이벤트 클래스 입력 (FQCN):"
+      custom_player_getter: "&e플레이어 Getter 메서드 입력:"
+      targets_amount: "&e필요 개수 입력:"
+      targets_repeat: "&e반복 횟수 입력:"
+      targets_points: "&e퀘스트 포인트 입력:"
+      meta_id: "&e퀘스트 ID 입력:"
+      meta_name: "&e퀘스트 이름 입력:"
+      options_resetpolicy: "&e리셋 정책 입력:"
+      options_resettime: "&e리셋 시간 입력:"
+      chain_next: "&e다음 퀘스트 ID 입력:"
+      list_add: "&e새 항목 입력:"
+      list_edit: "&e바꿀 값 입력 (기존: %old%):"
+      captures_add: "&e캡처 입력 (예: %block_type%;getBlock().getType().name()):"
+      captures_edit: "&e캡처 수정 (기존: %line%):"
+    error:
+      id_empty: "&c퀘스트 ID는 필수입니다!"
+      folder_create: "&c퀘스트 폴더 생성 실패!"
+      captures_format: "&c잘못된 캡처 형식! 예: %block_type%;getBlock().getType().name()"
+    save:
+      ok: "&a퀘스트 저장됨: %id%"
+      fail: "&c저장 실패: %msg%"

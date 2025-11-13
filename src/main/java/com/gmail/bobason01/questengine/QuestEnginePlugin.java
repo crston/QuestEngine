@@ -3,8 +3,10 @@ package com.gmail.bobason01.questengine;
 import com.gmail.bobason01.questengine.action.ActionExecutor;
 import com.gmail.bobason01.questengine.command.QuestAdminCommand;
 import com.gmail.bobason01.questengine.command.QuestCommand;
+import com.gmail.bobason01.questengine.command.QuestEditorCommand;
 import com.gmail.bobason01.questengine.command.QuestEngineCommand;
 import com.gmail.bobason01.questengine.gui.QuestGuiManager;
+import com.gmail.bobason01.questengine.gui.editor.QuestEditorMenu;
 import com.gmail.bobason01.questengine.party.PartyHook;
 import com.gmail.bobason01.questengine.papi.QuestPapiExpansion;
 import com.gmail.bobason01.questengine.progress.ProgressRepository;
@@ -29,9 +31,7 @@ import java.util.jar.JarFile;
 
 /**
  * QuestEnginePlugin
- * - High-performance asynchronous quest engine
- * - Fully compatible with Paper/Purpur/Folia
- * - Supports automatic quest extraction from JAR (resources/quests/*.yml)
+ * 기존 구조에 퀘스트 편집기 통합
  */
 public final class QuestEnginePlugin extends JavaPlugin {
 
@@ -42,27 +42,21 @@ public final class QuestEnginePlugin extends JavaPlugin {
     private ExecutorService asyncPool;
     private Msg msg;
     private QuestGuiManager gui;
+    private QuestEditorMenu editorMenu;
 
     @Override
     public void onEnable() {
         long start = System.currentTimeMillis();
         getLogger().info("[QuestEngine] Initializing...");
 
-        // ------------------------------------------------------------
-        // Config + Messages
-        // ------------------------------------------------------------
         saveDefaultConfig();
         msg = new Msg(this);
 
-        // ------------------------------------------------------------
-        // Repositories & folders
-        // ------------------------------------------------------------
         File questDir = new File(getDataFolder(), getConfig().getString("quests.folder", "quests"));
         if (!questDir.exists() && !questDir.mkdirs()) {
             getLogger().warning("[QuestEngine] Failed to create quest folder: " + questDir.getAbsolutePath());
         }
 
-        // 내부 JAR의 /quests/ 리소스를 외부로 복사
         try {
             copyDefaultQuests(questDir);
         } catch (Exception e) {
@@ -72,9 +66,6 @@ public final class QuestEnginePlugin extends JavaPlugin {
         quests = new QuestRepository(this, questDir);
         progress = new ProgressRepository(this);
 
-        // ------------------------------------------------------------
-        // Thread pool
-        // ------------------------------------------------------------
         asyncPool = Executors.newFixedThreadPool(
                 Math.max(2, Runtime.getRuntime().availableProcessors() / 2),
                 r -> {
@@ -83,15 +74,9 @@ public final class QuestEnginePlugin extends JavaPlugin {
                     return t;
                 });
 
-        // ------------------------------------------------------------
-        // Engine + Actions
-        // ------------------------------------------------------------
         actions = new ActionExecutor(this, msg);
         engine = new Engine(this, quests, progress, actions, msg, asyncPool);
 
-        // ------------------------------------------------------------
-        // Cache preload for online players
-        // ------------------------------------------------------------
         for (Player p : Bukkit.getOnlinePlayers()) {
             try {
                 progress.preload(p.getUniqueId());
@@ -101,27 +86,18 @@ public final class QuestEnginePlugin extends JavaPlugin {
             }
         }
 
-        // ------------------------------------------------------------
-        // Register event listeners
-        // ------------------------------------------------------------
         Bukkit.getScheduler().runTask(this, () -> {
             try {
                 new EventDispatcher(this, engine);
                 new DynamicEventListener(this, engine, quests);
-                getLogger().info("[QuestEngine] Event listeners registered (Paper-safe).");
+                getLogger().info("[QuestEngine] Event listeners registered.");
             } catch (Throwable t) {
                 getLogger().warning("[QuestEngine] Event registration failed: " + t.getMessage());
             }
         });
 
-        // ------------------------------------------------------------
-        // Party hooks
-        // ------------------------------------------------------------
         PartyHook.init(this, getConfig());
 
-        // ------------------------------------------------------------
-        // PlaceholderAPI
-        // ------------------------------------------------------------
         if (Bukkit.getPluginManager().isPluginEnabled("PlaceholderAPI")) {
             try {
                 new QuestPapiExpansion(this).register();
@@ -131,17 +107,13 @@ public final class QuestEnginePlugin extends JavaPlugin {
             }
         }
 
-        // ------------------------------------------------------------
-        // Commands
-        // ------------------------------------------------------------
+        gui = new QuestGuiManager(this);
+        editorMenu = new QuestEditorMenu(this);
+
         new QuestCommand(this);
         new QuestAdminCommand(this);
         new QuestEngineCommand(this);
-
-        // ------------------------------------------------------------
-        // GUI
-        // ------------------------------------------------------------
-        gui = new QuestGuiManager(this);
+        new QuestEditorCommand(this, editorMenu);
 
         long took = System.currentTimeMillis() - start;
         getLogger().info("[QuestEngine] Enabled successfully in " + took + "ms");
@@ -163,19 +135,34 @@ public final class QuestEnginePlugin extends JavaPlugin {
         getLogger().info("[QuestEngine] Disabled safely.");
     }
 
-    // ------------------------------------------------------------
-    // Accessors
-    // ------------------------------------------------------------
-    public Engine engine() { return engine; }
-    public QuestRepository quests() { return quests; }
-    public ProgressRepository progress() { return progress; }
-    public Msg msg() { return msg; }
-    public QuestGuiManager gui() { return gui; }
-    public ExecutorService asyncPool() { return asyncPool; }
+    public Engine engine() {
+        return engine;
+    }
 
-    // ------------------------------------------------------------
-    // Async helper
-    // ------------------------------------------------------------
+    public QuestRepository quests() {
+        return quests;
+    }
+
+    public ProgressRepository progress() {
+        return progress;
+    }
+
+    public Msg msg() {
+        return msg;
+    }
+
+    public QuestGuiManager gui() {
+        return gui;
+    }
+
+    public ExecutorService asyncPool() {
+        return asyncPool;
+    }
+
+    public QuestEditorMenu editorMenu() {
+        return editorMenu;
+    }
+
     public void runAsync(Runnable task) {
         if (asyncPool == null || asyncPool.isShutdown()) {
             getLogger().warning("[QuestEngine] Async pool not available, running sync.");
@@ -185,9 +172,6 @@ public final class QuestEnginePlugin extends JavaPlugin {
         asyncPool.submit(task);
     }
 
-    // ------------------------------------------------------------
-    // Quest Extraction from JAR
-    // ------------------------------------------------------------
     private void copyDefaultQuests(File questDir) throws Exception {
         File jarFile;
         try {
@@ -207,7 +191,7 @@ public final class QuestEnginePlugin extends JavaPlugin {
                 String fileName = name.substring("quests/".length());
                 File outFile = new File(questDir, fileName);
 
-                if (outFile.exists()) continue; // 이미 존재 시 스킵
+                if (outFile.exists()) continue;
 
                 try (InputStream in = jar.getInputStream(entry);
                      FileOutputStream out = new FileOutputStream(outFile)) {

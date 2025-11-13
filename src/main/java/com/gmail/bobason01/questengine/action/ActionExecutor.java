@@ -145,7 +145,7 @@ public final class ActionExecutor {
                 continue;
             }
             if (s.startsWith("msg{") || s.startsWith("message{")) {
-                String t = extract(s, "t=");
+                String t = extract(s, "m=");
                 out.add(new ActionEntry(ActionType.MESSAGE, t, 0, delay, target));
                 continue;
             }
@@ -155,7 +155,7 @@ public final class ActionExecutor {
                 continue;
             }
             if (s.startsWith("item{")) {
-                String t = extract(s, "t=");
+                String t = extract(s, "i=");
                 int a = parseIntSafe(extract(s, "a="), 1);
                 out.add(new ActionEntry(ActionType.ITEM, t, a, delay, target));
                 continue;

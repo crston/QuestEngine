@@ -15,9 +15,9 @@ display:
 
 actions:
   start:
-    - msg{t="&7Find the Guard Captain near the barracks."} @self
+    - msg{m="&7Find the Guard Captain near the barracks."} @self
   success:
-    - msg{t="&aCaptain: Well done, recruit. You’re ready for the ceremony."} @self
+    - msg{m="&aCaptain: Well done, recruit. You’re ready for the ceremony."} @self
     - command{c="eco give %player% 25"} @server
 
 chain:

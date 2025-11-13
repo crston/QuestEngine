@@ -18,7 +18,7 @@ quest_repeat_ready: "&6Quest '%quest_name%' is available again. Retry with /ques
 quest_no_repeat: "&cYou have already completed this quest and cannot undertake it again."
 
 # ==========================================================
-# NEW QUEST BOARD & CHAIN SYSTEM
+# QUEST BOARD & CHAIN SYSTEM
 # ==========================================================
 quest_board_only: "&7This quest can only be accepted from the Quest Board."
 quest_board_repeat: "&eQuest '%quest_name%' completed.&7 Accept it again from the Quest Board to replay."
@@ -61,22 +61,16 @@ gui:
     list: "&aActive Quests"
     public: "&bQuest Board"
     leaderboard: "&6Leaderboard"
-
   lore:
     list:
       - "&7%quest_title%"
       - "&aProgress: &f%value%/%target%"
       - "&eReward: &f%reward%"
-
   confirm:
     title: "&cConfirm Quest Cancellation: %quest%"
     yes_lore: "&7Are you sure you want to cancel the quest '%quest%'?"
     no_lore: "&7No, go back."
     cancel_done: "&eThe quest '%quest%' has been cancelled."
-
-  # ------------------------------
-  # Personal Quest List (QuestListMenu)
-  # ------------------------------
   list:
     title: "&bQuest List &7| &fPage %page%"
     search: "&f🔍 Search"
@@ -96,17 +90,12 @@ gui:
     page_input_lore: "&7Click and enter a page number"
     page_input_prompt: "Enter the page number to go to"
     left_click_start: "&aLeft-click: Start quest"
-    left_click_complete: "&aLeft-click: Try to complete quest"
     right_click_cancel: "&cRight-click: Cancel quest"
     quest_completed: "&aQuest completed: &f%quest%"
     quest_cancelled: "&7Quest cancelled: &f%quest%"
     quest_cannot_complete: "&cYou don’t meet the completion conditions."
     quest_complete_error: "&cAn error occurred while completing the quest."
     method_missing: "&cCould not find completion method."
-
-  # ------------------------------
-  # Quest Board (PublicQuestMenu)
-  # ------------------------------
   public:
     title: "&bQuest Board | &fPage %page%"
     back: "&f← Back to My Quests"
@@ -125,10 +114,6 @@ gui:
     error_accept: "&cAn error occurred while accepting the quest."
     reward_label: "&eReward: &f"
     left_click_start: "&aLeft-click: Accept quest"
-
-  # ------------------------------
-  # Leaderboard (LeaderboardMenu)
-  # ------------------------------
   leaderboard:
     title: "&6Quest Leaderboard"
     back: "&f← Back to My Quests"
@@ -136,3 +121,242 @@ gui:
     rank_format: "&e#%rank% &f%player% &7- &a%points% pts"
     rank_points: "&7Points: &f%points%"
     no_data: "&7No data to display."
+
+  # ==========================================================
+  # QUEST EDITOR GUI (A안)
+  # ==========================================================
+  editor:
+    title:
+      main: "&9Quest Editor - %tab%"
+      main.prefix: "Quest Editor -"
+      list: "&9List Editor - %key%"
+      list.prefix: "List Editor -"
+      event: "&9Event Select %page%/%max%"
+      event.prefix: "Event Select"
+      captures: "&9Captures Editor"
+      captures.prefix: "Captures Editor"
+    tab:
+      selected: "&b%name%"
+      normal: "&e%name%"
+      lore:
+        current: "&7Current tab"
+        switch: "&7Click to switch"
+      display: "DISPLAY"
+      event: "EVENT"
+      custom_event: "CUSTOM EVENT"
+      targets: "TARGETS"
+      meta: "META"
+      actions: "ACTIONS"
+      conditions: "CONDITIONS"
+      options: "OPTIONS"
+      chain: "CHAIN"
+    common:
+      empty: "(empty)"
+      text:
+        name: "&6%label%"
+        value: "&f%value%"
+        left: "&eLeft-click: edit"
+        right: "&cRight-click: reset"
+      number:
+        name: "&6%label%"
+        value: "&f%value%"
+        edit: "&eLeft-click: edit number"
+      boolean:
+        name: "&6%label%"
+        value: "&f%value%"
+        edit: "&eLeft-click: toggle"
+      list:
+        name: "&6%label%"
+        entries: "&7Entries: %count%"
+        edit: "&eClick to edit list"
+    display:
+      title:
+        label: "Display Title"
+      description:
+        label: "Description"
+      progress:
+        label: "Progress Format"
+      cmd:
+        label: "CustomModelData"
+      hint:
+        label: "Hint"
+      reward:
+        label: "Reward Description"
+      category:
+        label: "Category"
+      difficulty:
+        label: "Difficulty"
+      icon:
+        name: "&6Display Icon"
+        value: "&bItem: %value%"
+        left: "&eLeft-click: enter material manually"
+        right: "&cRight-click: reset to BOOK"
+        inv: "&aOpen this tab and click an item in your inventory to apply it."
+        help:
+          title: "&bDisplay Icon Help"
+          help1: "&7With this tab open,"
+          help2: "&7click any inventory item to assign it."
+          help3: "&7CustomModelData is copied automatically."
+          help4: "&7If CustomModelData is missing, default is used."
+    event:
+      event:
+        label: "Event"
+      startmode:
+        label: "Start Mode"
+      type:
+        label: "Quest Type"
+      help:
+        title: "&bEvent Help"
+        help1: "&7Left-click: edit event name manually"
+        help2: "&7Shift+Left-click: open event list"
+        help3: "&7Right-click: reset to CUSTOM"
+      entry:
+        name: "&6%event%"
+        lore1: "&7Use this event"
+        lore2: "&eClick to apply"
+      prev:
+        name: "&ePrevious Page"
+        lore: "&7Page %page%"
+      next:
+        name: "&eNext Page"
+        lore: "&7Page %page%"
+      back:
+        name: "&cBack"
+        lore: "&7Return to editor"
+    custom:
+      eventclass:
+        label: "Event Class"
+      playergetter:
+        label: "Player Getter"
+      captures:
+        label: "&bCaptures"
+        entries: "&7Count: %count%"
+        left: "&eLeft-click: edit"
+        right: "&cRight-click: clear all"
+        format: "&f%key%;%chain%"
+    captures:
+      entry:
+        name: "&f%key%"
+        chain: "&f%chain%"
+        left: "&eLeft-click: edit"
+        right: "&cRight-click: delete"
+      add:
+        name: "&aAdd Capture"
+        lore1: "&7Example: %block_type%;getBlock().getType().name()"
+        lore2: "&aLeft-click to add"
+      back:
+        name: "&eBack"
+        lore: "&7Return to editor"
+    targets:
+      targets:
+        label: "Targets"
+      amount:
+        label: "Amount"
+      repeat:
+        label: "Repeat"
+      points:
+        label: "Quest Points"
+    meta:
+      id:
+        label: "Quest ID"
+      name:
+        label: "Quest Name"
+    actions:
+      group:
+        accept: "ACCEPT"
+        start: "START"
+        success: "SUCCESS"
+        fail: "FAIL"
+        cancel: "CANCEL"
+        stop: "STOP"
+        restart: "RESTART"
+        repeat: "REPEAT"
+      lines: "&bLines: %count%"
+      left: "&eLeft-click: edit action lines"
+      right: "&cRight-click: clear"
+      help:
+        title: "&bAction Examples"
+        help1: "&7msg{m=Hello} @self"
+        help2: "&7cmd{c=give %player% diamond 1} @server"
+        help3: "&7item{i=DIAMOND;a=5}"
+        help4: "&7delay 10"
+    conditions:
+      help:
+        title: "&bCondition Help"
+        help1: "&7You can use PAPI placeholders or custom capture variables."
+        help2: "&f%player_level% >= 10 &7→ passes only if the player's level is 10 or higher."
+        help3: "&f%player_health% < 5 &7→ passes only if player's health is below 5."
+        help4: "&f%block_type% == DIAMOND_ORE &7→ checks if the block type matches."
+        help5: "&7You can combine multiple conditions using &fAND &7or &fOR&7."
+      start:
+        label: "Start Conditions"
+      success:
+        label: "Success Conditions"
+      fail:
+        label: "Fail Conditions"
+    options:
+      help:
+        title: "&bOptions Help"
+        help1: "&7resetPolicy examples:"
+        help2: "&fDAILY &7→ resets every day"
+        help3: "&fWEEKLY &7→ resets every week"
+        help4: "&fNONE &7→ quest never resets"
+        help5: "&7resetTime examples:"
+        help6: "&f04:00 &7→ resets daily at 4 AM"
+        help7: "&f21:30 &7→ resets at 21:30 (9:30 PM)"
+        help8: "&7Use 24-hour format (HH:MM)"
+      resetpolicy:
+        label: "Reset Policy"
+      resettime:
+        label: "Reset Time"
+      public:
+        label: "Public Quest"
+      party:
+        label: "Party Quest"
+    chain:
+      next:
+        label: "Next Quest"
+    list:
+      add:
+        name: "&aAdd Entry"
+        lore1: "&7Left-click to add a new entry"
+    control:
+      save:
+        name: "&aSave"
+        lore1: "&7Save quest to file"
+        lore2: "&7Repository will be reloaded"
+      close:
+        name: "&cClose"
+        lore: "&7Close editor"
+    prompt:
+      display_title: "&eEnter display title:"
+      display_icon: "&eEnter icon material:"
+      display_progress: "&eEnter progress format:"
+      display_cmd: "&eEnter CustomModelData (-1 = none):"
+      display_hint: "&eEnter hint:"
+      display_reward: "&eEnter reward description:"
+      display_category: "&eEnter category:"
+      display_difficulty: "&eEnter difficulty:"
+      event_name: "&eEnter event name:"
+      event_type: "&eEnter quest type:"
+      custom_event_class: "&eEnter custom event class (FQCN):"
+      custom_player_getter: "&eEnter player getter method chain:"
+      targets_amount: "&eEnter amount:"
+      targets_repeat: "&eEnter repeat count:"
+      targets_points: "&eEnter quest points:"
+      meta_id: "&eEnter quest ID:"
+      meta_name: "&eEnter quest name:"
+      options_resetpolicy: "&eEnter reset policy:"
+      options_resettime: "&eEnter reset time:"
+      chain_next: "&eEnter next quest ID:"
+      list_add: "&eEnter new entry:"
+      list_edit: "&eEnter replacement (old: %old%):"
+      captures_add: "&eEnter capture (example: %block_type%;getBlock().getType().name()):"
+      captures_edit: "&eEdit capture (old: %line%):"
+    error:
+      id_empty: "&cQuest ID is required!"
+      folder_create: "&cFailed to create quests folder!"
+      captures_format: "&cInvalid capture format! Example: %block_type%;getBlock().getType().name()"
+    save:
+      ok: "&aQuest saved: %id%"
+      fail: "&cSave failed: %msg%"

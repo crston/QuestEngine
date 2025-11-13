@@ -11,15 +11,14 @@ import java.util.stream.Collectors;
 
 /**
  * ProgressRepository
- * - 완전 비동기 안전 / 고성능 캐시 기반 구조
- * - TPS 안정 보장 (200명 이상 서버에서도 안정)
- * - reload 후 캐시 복구 / null 안전 보장
- * - 리더보드(points) 자동 동기화 포함
+ * 고성능 비동기 안전 퀘스트 진행 저장소
+ * 모든 questId 는 lower-case 로 정규화하여 unknown quest 문제를 방지
  */
 public final class ProgressRepository {
 
     private final QuestEnginePlugin plugin;
     private final StorageProvider storage;
+
     private final ConcurrentMap<UUID, PlayerData> cache = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, Object> locks = new ConcurrentHashMap<>();
     private final BlockingQueue<UUID> saveQueue = new LinkedBlockingQueue<>();
@@ -35,15 +34,15 @@ public final class ProgressRepository {
     public ProgressRepository(QuestEnginePlugin plugin) {
         this.plugin = plugin;
         this.storage = buildProvider(plugin);
+
         ioExecutor.scheduleAtFixedRate(this::flushQueue, 3, 3, TimeUnit.SECONDS);
 
-        // 서버 시작 시 저장소에서 초기 포인트 로드 (리더보드 초기화)
         CompletableFuture.runAsync(() -> {
             try {
                 Map<UUID, Integer> all = storage.loadAllPointsApprox();
                 if (all != null && !all.isEmpty()) {
                     points.putAll(all);
-                    plugin.getLogger().info("[QuestEngine] Loaded " + points.size() + " player points into leaderboard cache.");
+                    plugin.getLogger().info("[QuestEngine] Loaded " + points.size() + " leaderboard entries.");
                 }
             } catch (Throwable t) {
                 plugin.getLogger().warning("[QuestEngine] Failed to preload points: " + t.getMessage());
@@ -61,13 +60,14 @@ public final class ProgressRepository {
         }
     }
 
-    private Object lockFor(UUID id, String qid) {
-        return locks.computeIfAbsent(id.toString() + "|" + qid, k -> new Object());
+    private String norm(String qid) {
+        return qid == null ? null : qid.toLowerCase(Locale.ROOT);
     }
 
-    // ============================================================
-    // Core Access
-    // ============================================================
+    private Object lockFor(UUID id, String qid) {
+        return locks.computeIfAbsent(id.toString() + "|" + norm(qid), k -> new Object());
+    }
+
     public PlayerData of(UUID id, String name) {
         PlayerData data = cache.computeIfAbsent(id, k -> storage.load(id, name));
         if (data == null) {
@@ -77,21 +77,18 @@ public final class ProgressRepository {
         return data;
     }
 
-    // ============================================================
-    // Saving
-    // ============================================================
+    private void enqueueSave(UUID id) {
+        if (id != null) saveQueue.offer(id);
+    }
+
     private void flushQueue() {
-        Set<UUID> unique = new HashSet<>();
-        saveQueue.drainTo(unique);
-        for (UUID id : unique) {
+        Set<UUID> set = new HashSet<>();
+        saveQueue.drainTo(set);
+        for (UUID id : set) {
             try {
                 saveNow(id);
             } catch (Throwable ignored) {}
         }
-    }
-
-    private void enqueueSave(UUID id) {
-        if (id != null) saveQueue.offer(id);
     }
 
     private void saveNow(UUID id) {
@@ -99,15 +96,16 @@ public final class ProgressRepository {
         if (d != null) storage.save(d);
     }
 
-    // ============================================================
-    // Public API
-    // ============================================================
-
     public boolean isActive(UUID id, String name, String qid) {
-        return of(id, name).isActive(qid);
+        return of(id, name).isActive(norm(qid));
+    }
+
+    public boolean isCompleted(UUID id, String name, String qid) {
+        return of(id, name).isCompleted(norm(qid));
     }
 
     public void start(UUID id, String name, String qid) {
+        qid = norm(qid);
         synchronized (lockFor(id, qid)) {
             of(id, name).start(qid);
         }
@@ -115,6 +113,7 @@ public final class ProgressRepository {
     }
 
     public void cancel(UUID id, String name, String qid) {
+        qid = norm(qid);
         synchronized (lockFor(id, qid)) {
             of(id, name).cancel(qid);
         }
@@ -122,93 +121,81 @@ public final class ProgressRepository {
     }
 
     public void complete(UUID id, String name, String qid, int pts) {
+        qid = norm(qid);
         synchronized (lockFor(id, qid)) {
             of(id, name).complete(qid, pts);
         }
         enqueueSave(id);
-        // 리더보드 포인트 캐시 자동 갱신
         setPoints(id, of(id, name).totalPoints());
     }
 
     public int addProgress(UUID id, String name, String qid, int amt) {
+        qid = norm(qid);
         synchronized (lockFor(id, qid)) {
             int v = of(id, name).add(qid, amt);
             enqueueSave(id);
-            // 진행 중에도 포인트 갱신 (선택적)
             setPoints(id, of(id, name).totalPoints());
             return v;
         }
     }
 
     public int value(UUID id, String name, String qid) {
-        return of(id, name).valueOf(qid);
+        return of(id, name).valueOf(norm(qid));
     }
 
-    public List<String> activeQuestIds(UUID id, String name) {
+    public List<String> activeIds(UUID id, String name) {
         return of(id, name).activeIds();
     }
 
-    public void cancelAll(UUID id, String name) {
-        PlayerData d = of(id, name);
-        synchronized (d) {
-            d.cancelAll();
-        }
-        enqueueSave(id);
-        setPoints(id, of(id, name).totalPoints());
+    public List<String> activeOf(UUID uid, String name) {
+        return activeQuestIds(uid, name);
     }
 
-    public boolean isCompleted(UUID id, String name, String qid) {
-        return of(id, name).isCompleted(qid);
-    }
-
-    public List<String> completedQuestIds(UUID id, String name) {
+    public List<String> completedIds(UUID id, String name) {
         return of(id, name).completedIds();
     }
 
-    public int activeCount(UUID id, String name) {
-        return of(id, name).activeCount();
-    }
-
-    public int completedCount(UUID id, String name) {
-        return of(id, name).completedIds().size();
-    }
-
-    public int totalPoints(UUID id, String name) {
-        return of(id, name).totalPoints();
-    }
-
-    public int getPoints(UUID id) {
-        PlayerData d = cache.get(id);
-        if (d != null) return d.totalPoints();
-        Map<UUID, Integer> all = storage.loadAllPointsApprox();
-        Integer val = all.get(id);
-        return val == null ? 0 : val;
-    }
-
-    public Map<UUID, Integer> getAllPoints() {
-        Map<UUID, Integer> map = storage.loadAllPointsApprox();
-        for (Map.Entry<UUID, PlayerData> e : cache.entrySet()) {
-            map.put(e.getKey(), e.getValue().totalPoints());
+    public void cancelAll(UUID id, String name) {
+        PlayerData data = of(id, name);
+        synchronized (data) {
+            data.cancelAll();
         }
-        return map;
+        enqueueSave(id);
+        setPoints(id, data.totalPoints());
     }
 
-    // ============================================================
-    // Reset & Lifecycle
-    // ============================================================
     public void reset(UUID id) {
         cache.remove(id);
         storage.reset(id);
         points.remove(id);
     }
 
-    public void reset(UUID id, String name, String questId) {
-        synchronized (lockFor(id, questId)) {
-            of(id, name).cancel(questId);
+    public void reset(UUID id, String name, String qid) {
+        qid = norm(qid);
+        synchronized (lockFor(id, qid)) {
+            of(id, name).cancel(qid);
         }
-        storage.resetQuest(id, questId);
+        storage.resetQuest(id, qid);
         enqueueSave(id);
         setPoints(id, of(id, name).totalPoints());
+    }
+
+    public void preload(UUID id) {
+        cache.computeIfAbsent(id, k -> storage.load(id, "unknown"));
+    }
+
+    public void preloadAll() {
+        storage.preloadAll();
+    }
+
+    public PlayerData get(UUID id) {
+        return cache.computeIfAbsent(id, k -> storage.load(k, "unknown"));
+    }
+
+    public void save(PlayerData d) {
+        if (d == null) return;
+        storage.save(d);
+        cache.put(d.getId(), d);
     }
 
     public void close() {
@@ -220,85 +207,74 @@ public final class ProgressRepository {
         points.clear();
     }
 
-    // ============================================================
-    // Preload / Batch Load
-    // ============================================================
-    public void preload(UUID uuid) {
-        cache.computeIfAbsent(uuid, k -> storage.load(uuid, "unknown"));
+    public void setPoints(UUID id, int val) {
+        if (id == null) return;
+        points.put(id, Math.max(0, val));
     }
 
-    public void preloadAll() {
-        storage.preloadAll();
+    public int getPoints(UUID id) {
+        if (id == null) return 0;
+        PlayerData data = cache.get(id);
+        return data != null ? data.totalPoints() : 0;
+    }
+
+    /* ==================================================================
+       조회 헬퍼 메서드 세트
+       ================================================================== */
+
+    public int getPoints(UUID id, String name) {
+        return getPoints(id);
     }
 
     public int cacheSize() {
         return cache.size();
     }
 
-    /**
-     * 현재 플레이어의 첫 번째 활성 퀘스트 ID를 반환합니다.
-     */
+    public Map<UUID, Integer> getAllPoints() {
+        Map<UUID, Integer> map = storage.loadAllPointsApprox();
+        for (Map.Entry<UUID, PlayerData> e : cache.entrySet()) {
+            map.put(e.getKey(), e.getValue().totalPoints());
+        }
+        return map;
+    }
+
+    public int activeCount(UUID id, String name) {
+        PlayerData d = get(id);
+        return d == null ? 0 : d.activeIds().size();
+    }
+
+    public int completedCount(UUID id, String name) {
+        PlayerData d = get(id);
+        return d == null ? 0 : d.completedIds().size();
+    }
+
+    public int totalPoints(UUID id, String name) {
+        PlayerData d = get(id);
+        return d == null ? 0 : d.totalPoints();
+    }
+
     public String firstActiveId(UUID id, String name) {
-        PlayerData data = of(id, name);
-        List<String> actives = data.activeIds();
-        return actives.isEmpty() ? null : actives.get(0);
+        PlayerData d = get(id);
+        if (d == null) return null;
+        List<String> list = d.activeIds();
+        return list.isEmpty() ? null : list.get(0);
     }
 
-    /**
-     * 플레이어의 현재 활성 퀘스트 ID 목록을 반환합니다.
-     */
-    public List<String> activeOf(UUID uid, String name) {
-        if (uid == null || name == null) return Collections.emptyList();
-
-        List<String> result = new ArrayList<>();
-        try {
-            for (String questId : plugin.quests().ids()) {
-                try {
-                    if (isActive(uid, name, questId)) {
-                        result.add(questId);
-                    }
-                } catch (Throwable ignored) {}
-            }
-        } catch (Throwable t) {
-            plugin.getLogger().warning("[QuestEngine] activeOf() failed for " + name + ": " + t.getMessage());
-        }
-        return result;
+    public List<String> activeQuestIds(UUID id, String name) {
+        PlayerData d = get(id);
+        return d == null ? Collections.emptyList() : d.activeIds();
     }
 
-    // ============================================================
-    // Leaderboard
-    // ============================================================
-
-    public void setPoints(UUID uuid, int value) {
-        if (uuid == null) return;
-        points.put(uuid, Math.max(0, value));
+    public List<String> completedQuestIds(UUID id, String name) {
+        PlayerData d = get(id);
+        return d == null ? Collections.emptyList() : new ArrayList<>(d.completedIds());
     }
 
-    /**
-     * 상위 플레이어 목록 반환 (리더보드)
-     */
     public List<Map.Entry<UUID, Integer>> top(int limit) {
-        // 최신 캐시 기준 정렬
-        if (points.isEmpty()) {
-            // 캐시 비어있으면 스토리지에서 불러오기
-            Map<UUID, Integer> all = getAllPoints();
-            points.putAll(all);
-        }
-        return points.entrySet().stream()
+        Map<UUID, Integer> map = getAllPoints();
+        return map.entrySet().stream()
                 .sorted((a, b) -> Integer.compare(b.getValue(), a.getValue()))
                 .limit(limit)
                 .collect(Collectors.toList());
-    }
-    public List<String> listActiveIds(UUID uid, String playerName) {
-        if (uid == null) return List.of();
-        return of(uid, playerName).activeIds();
-    }
-    public PlayerData get(UUID id) {
-        return cache.computeIfAbsent(id, k -> storage.load(k, "unknown"));
-    }
-    public void save(PlayerData data) {
-        if (data == null) return;
-        storage.save(data);
-        cache.put(data.getId(), data);
     }
 }

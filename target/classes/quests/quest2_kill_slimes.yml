@@ -15,9 +15,9 @@ display:
 
 actions:
   start:
-    - msg{t="&7The villagers are counting on you to clean up the slimes!"} @self
+    - msg{m="&7The villagers are counting on you to clean up the slimes!"} @self
   success:
-    - msg{t="&aYou’ve defeated all the slimes!"} @self
+    - msg{m="&aYou’ve defeated all the slimes!"} @self
     - command{c="eco give %player% 50"} @server
 
 chain:

@@ -27,7 +27,7 @@ public final class ChatInput implements Listener {
     // 대기 중인 입력자 목록
     private final Map<UUID, BiConsumer<Player, String>> waiting = new ConcurrentHashMap<>();
 
-    private ChatInput(QuestEnginePlugin pl) {
+    public ChatInput(QuestEnginePlugin pl) {
         plugin = pl;
         Bukkit.getPluginManager().registerEvents(this, pl);
     }

@@ -40,12 +40,12 @@ actions:
   start:
     - msg{t="&7Quest started: &aMine 10 stones!"} @self
   success:
-    - msg{t="&aYou completed the mining quest!"} @self
+    - msg{m="&aYou completed the mining quest!"} @self
     - command{c="eco give %player% 100"} @server
   cancel:
-    - msg{t="&cQuest canceled."} @self
+    - msg{m="&cQuest canceled."} @self
   fail:
-    - msg{t="&cQuest failed because you went to the Nether."} @self
+    - msg{m="&cQuest failed because you went to the Nether."} @self
   next:
     - command{c="quest start next_quest"} @self
 

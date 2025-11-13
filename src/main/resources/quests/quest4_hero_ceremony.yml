@@ -19,7 +19,7 @@ custom_event_data:
 
 actions:
   start:
-    - msg{t="&7Wait for the ceremony to begin..." } @self
+    - msg{m="&7Wait for the ceremony to begin..." } @self
   success:
-    - msg{t="&aYou bowed before the king. You are now a recognized hero!"} @self
+    - msg{m="&aYou bowed before the king. You are now a recognized hero!"} @self
     - command{c="eco give %player% 100"} @server

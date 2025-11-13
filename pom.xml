@@ -6,7 +6,7 @@
 
     <groupId>com.gmail.bobason01</groupId>
     <artifactId>QuestEngine</artifactId>
-    <version>6.0</version>
+    <version>30.0</version>
     <packaging>jar</packaging>
 
     <name>QuestEngine</name>

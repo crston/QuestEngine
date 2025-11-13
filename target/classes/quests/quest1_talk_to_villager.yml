@@ -16,9 +16,9 @@ display:
 
 actions:
   start:
-    - msg{t="&7A villager wants to talk to you."} @self
+    - msg{m="&7A villager wants to talk to you."} @self
   success:
-    - msg{t="&aVillager: Please defeat the slimes near our farm!"} @self
+    - msg{m="&aVillager: Please defeat the slimes near our farm!"} @self
     - command{c="eco give %player% 10"} @server
 
 chain:
