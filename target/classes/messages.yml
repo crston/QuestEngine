@@ -128,9 +128,9 @@ gui:
   editor:
     title:
       main: "&9Quest Editor - %tab%"
-      main.prefix: "Quest Editor -"
+      main_prefix: "Quest Editor -"
       list: "&9List Editor - %key%"
-      list.prefix: "List Editor -"
+      list_prefix: "List Editor -"
       event: "&9Event Select %page%/%max%"
       event.prefix: "Event Select"
       captures: "&9Captures Editor"

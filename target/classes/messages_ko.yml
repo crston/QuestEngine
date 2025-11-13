@@ -127,10 +127,10 @@ gui:
   # ==========================================================
   editor:
     title:
-      main: "&9퀘스트 에디터 - %tab%"
-      main.prefix: "퀘스트 에디터 -"
+      main: "&9퀘스트 편집 - %tab%"
+      main_prefix: "퀘스트 편집 -"
       list: "&9리스트 편집 - %key%"
-      list.prefix: "리스트 편집 -"
+      list_prefix: "리스트 편집 -"
       event: "&9이벤트 선택 %page%/%max%"
       event.prefix: "이벤트 선택"
       captures: "&9캡처 편집"
