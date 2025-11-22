@@ -14,6 +14,7 @@ public final class MySQLStorage extends AbstractSqlStorage {
         String host = plugin.getConfig().getString("storage.mysql.host", "localhost");
         int port = plugin.getConfig().getInt("storage.mysql.port", 3306);
         String db = plugin.getConfig().getString("storage.mysql.database", "questengine");
+
         String params = "useSSL=false&characterEncoding=utf8&serverTimezone=UTC&rewriteBatchedStatements=true";
         return "jdbc:mysql://" + host + ":" + port + "/" + db + "?" + params;
     }
@@ -22,10 +23,6 @@ public final class MySQLStorage extends AbstractSqlStorage {
         Properties p = new Properties();
         p.setProperty("user", plugin.getConfig().getString("storage.mysql.user", "root"));
         p.setProperty("password", plugin.getConfig().getString("storage.mysql.password", ""));
-        p.setProperty("autoReconnect", "true");
-        p.setProperty("cachePrepStmts", "true");
-        p.setProperty("prepStmtCacheSize", "256");
-        p.setProperty("prepStmtCacheSqlLimit", "2048");
         return p;
     }
 
@@ -43,6 +40,7 @@ public final class MySQLStorage extends AbstractSqlStorage {
                 "completed tinyint not null," +
                 "value int not null," +
                 "points int not null," +
+                "repeat_count int not null default 0," +
                 "primary key (uuid, quest_id)" +
                 ") engine=InnoDB default charset=utf8mb4";
     }

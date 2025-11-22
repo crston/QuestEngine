@@ -32,6 +32,7 @@ public final class SQLiteStorage extends AbstractSqlStorage {
                 "completed integer not null," +
                 "value integer not null," +
                 "points integer not null," +
+                "repeat_count integer not null default 0," +
                 "primary key (uuid, quest_id)" +
                 ")";
     }

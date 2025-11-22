@@ -4,6 +4,7 @@ import com.gmail.bobason01.questengine.QuestEnginePlugin;
 import com.gmail.bobason01.questengine.action.ActionExecutor;
 import com.gmail.bobason01.questengine.progress.PlayerData;
 import com.gmail.bobason01.questengine.progress.ProgressRepository;
+import com.gmail.bobason01.questengine.quest.CustomEventData;
 import com.gmail.bobason01.questengine.quest.QuestDef;
 import com.gmail.bobason01.questengine.quest.QuestRepository;
 import com.gmail.bobason01.questengine.util.Msg;
@@ -18,6 +19,7 @@ import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.player.AsyncPlayerChatEvent;
 import org.bukkit.event.player.PlayerCommandPreprocessEvent;
 
+import java.lang.reflect.Method;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.*;
@@ -41,7 +43,7 @@ public final class Engine {
     private final long conditionTtlNanos;
     private final long dedupWindowNanos;
 
-    private static final long NPC_ARM_WINDOW_NANOS = 2000000000L;
+    private static final long NPC_ARM_WINDOW_NANOS = 2_000_000_000L;
 
     private static final class BoolCacheEntry {
         final boolean value;
@@ -62,11 +64,14 @@ public final class Engine {
     }
 
     private final Map<UUID, NpcArmState> npcArm = new ConcurrentHashMap<>();
+    private final Map<String, QuestDef[]> customEventIndex = new ConcurrentHashMap<>();
 
     @FunctionalInterface
     public interface TargetMatcher {
         boolean test(Player player, Event event, String target);
     }
+
+    private static final Map<String, Method[]> CHAIN_CACHE = new ConcurrentHashMap<>();
 
     public Engine(
             QuestEnginePlugin plugin,
@@ -84,10 +89,10 @@ public final class Engine {
         this.worker = worker;
 
         long ttlMs = Math.max(50L, plugin.getConfig().getLong("performance.condition-cache-ttl-ms", 300L));
-        this.conditionTtlNanos = ttlMs * 1000000L;
+        this.conditionTtlNanos = ttlMs * 1_000_000L;
 
         long dedupMs = Math.max(3L, plugin.getConfig().getLong("performance.event-dedup-window-ms", 10L));
-        this.dedupWindowNanos = dedupMs * 1000000L;
+        this.dedupWindowNanos = dedupMs * 1_000_000L;
 
         installDefaultMatchers();
         scheduleDailyResets();
@@ -125,6 +130,7 @@ public final class Engine {
     public void refreshEventCache() {
         quests.reload();
         quests.rebuildEventMap();
+        rebuildCustomEventIndex();
     }
 
     public void shutdown() {
@@ -136,6 +142,7 @@ public final class Engine {
         recentEventWindow.clear();
         matchers.clear();
         npcArm.clear();
+        customEventIndex.clear();
     }
 
     public void startQuest(Player p, String questId) {
@@ -155,7 +162,7 @@ public final class Engine {
         UUID uid = player.getUniqueId();
         String name = player.getName();
 
-        if (progress.isCompleted(uid, name, def.id)) {
+        if (!progress.canStart(uid, name, def)) {
             player.sendMessage(format(player, msg.pref("quest_no_repeat").replace("%quest_name%", def.name)));
             return;
         }
@@ -170,7 +177,7 @@ public final class Engine {
             return;
         }
 
-        progress.start(uid, name, def.id);
+        progress.start(uid, name, def);
         actions.runAll(def, "accept", player);
         actions.runAll(def, "start", player);
         player.sendMessage(format(player, msg.pref("quest_started").replace("%quest_name%", def.name)));
@@ -225,12 +232,16 @@ public final class Engine {
         String id = questId.toLowerCase(Locale.ROOT);
         Player p = Bukkit.getPlayer(uuid);
         QuestDef q = quests.get(id);
-        int pts = q != null ? q.points : 0;
-        progress.complete(uuid, playerName, id, pts);
-        if (p != null && q != null) {
-            actions.runAll(q, "success", p);
-            p.sendMessage(format(p, msg.pref("quest_completed").replace("%quest_name%", q.name)));
-            runCompletionFlow(p, q);
+        if (q != null) {
+            progress.complete(uuid, playerName, q);
+            if (p != null) {
+                actions.runAll(q, "success", p);
+                p.sendMessage(format(p, msg.pref("quest_completed").replace("%quest_name%", q.name)));
+                runCompletionFlow(p, q);
+            }
+        } else {
+            int pts = 0;
+            progress.complete(uuid, playerName, id, pts);
         }
     }
 
@@ -240,7 +251,7 @@ public final class Engine {
         UUID uid = player.getUniqueId();
         String name = player.getName();
 
-        progress.complete(uid, name, def.id, def.points);
+        progress.complete(uid, name, def);
         actions.runAll(def, "success", player);
         player.sendMessage(format(player, msg.pref("quest_completed").replace("%quest_name%", def.name)));
         runCompletionFlow(player, def);
@@ -349,6 +360,13 @@ public final class Engine {
     public void handleDynamic(Event event) {
         if (event == null) return;
 
+        String className = event.getClass().getName();
+        QuestDef[] defs = customEventIndex.get(className);
+        if (defs != null && defs.length > 0) {
+            handleCustomDynamic(event, defs);
+            return;
+        }
+
         Player player = EventContextMapper.extractPlayer(event);
         if (player == null) {
             if (event instanceof EntityDeathEvent) {
@@ -388,7 +406,7 @@ public final class Engine {
         PlayerData data = progress.get(player.getUniqueId());
         if (data == null || !data.isActive(id)) return;
 
-        data.complete(id, def.points);
+        data.complete(id, def.points, def.repeat);
         progress.save(data);
 
         actions.run(def, "success", player);
@@ -416,23 +434,28 @@ public final class Engine {
 
             boolean active = progress.isActive(uid, name, def.id);
 
+            if (!active && !progress.canStart(uid, name, def)) {
+                continue;
+            }
+
             if (!active) {
-                if (def.startMode == QuestDef.StartMode.AUTO || def.startMode == QuestDef.StartMode.PUBLIC || def.startMode == QuestDef.StartMode.NPC) {
-                    if (eventKey.equalsIgnoreCase("ENTITY_INTERACT")) {
-                        continue;
-                    }
-                    if (!checkTargetMatch(player, event, matcher, def)) {
-                        continue;
-                    }
-                    if (!checkConditions(player, event, ctx, def.condStart)) {
-                        continue;
-                    }
-                    progress.start(uid, name, def.id);
-                    actions.runAll(def, "accept", player);
-                    actions.runAll(def, "start", player);
-                    player.sendMessage(format(player, msg.pref("quest_started").replace("%quest_name%", def.name)));
-                    active = true;
+                if (def.startMode != QuestDef.StartMode.AUTO) {
+                    continue;
                 }
+
+                if (!checkTargetMatch(player, event, matcher, def)) {
+                    continue;
+                }
+                if (!checkConditions(player, event, ctx, def.condStart)) {
+                    continue;
+                }
+
+                progress.start(uid, name, def);
+                actions.runAll(def, "accept", player);
+                actions.runAll(def, "start", player);
+                player.sendMessage(format(player, msg.pref("quest_started").replace("%quest_name%", def.name)));
+
+                active = true;
             }
 
             if (!active) continue;
@@ -531,6 +554,10 @@ public final class Engine {
             }
             if (!matched) continue;
 
+            if (!progress.canStart(uid, name, def) && !progress.isActive(uid, name, def.id)) {
+                continue;
+            }
+
             candidate = def;
             break;
         }
@@ -555,10 +582,13 @@ public final class Engine {
         }
 
         if (!active && !completed) {
+            if (!progress.canStart(uid, name, candidate)) {
+                return;
+            }
             if (!checkConditions(player, null, ctx, candidate.condStart)) {
                 return;
             }
-            progress.start(uid, name, candidate.id);
+            progress.start(uid, name, candidate);
             actions.runAll(candidate, "accept", player);
             actions.runAll(candidate, "start", player);
             player.sendMessage(format(player, msg.pref("quest_started").replace("%quest_name%", candidate.name)));
@@ -572,7 +602,7 @@ public final class Engine {
         String name = player.getName();
 
         actions.runAll(def, "success", player);
-        progress.complete(uid, name, def.id, def.points);
+        progress.complete(uid, name, def);
         player.sendMessage(format(player, msg.pref("quest_completed").replace("%quest_name%", def.name)));
 
         runCompletionFlow(player, def);
@@ -610,8 +640,11 @@ public final class Engine {
                 ));
             } else {
                 Supplier<Boolean> started = () -> {
-                    if (progress.isActive(player.getUniqueId(), player.getName(), def.id)) return Boolean.FALSE;
-                    progress.start(player.getUniqueId(), player.getName(), def.id);
+                    UUID uid = player.getUniqueId();
+                    String name = player.getName();
+                    if (progress.isActive(uid, name, def.id)) return Boolean.FALSE;
+                    if (!progress.canStart(uid, name, def)) return Boolean.FALSE;
+                    progress.start(uid, name, def);
                     actions.runAll(def, "restart", player);
                     actions.runAll(def, "repeat", player);
                     return Boolean.TRUE;
@@ -764,6 +797,7 @@ public final class Engine {
         try {
             quests.reload();
             quests.rebuildEventMap();
+            rebuildCustomEventIndex();
         } catch (Throwable t) {
             plugin.getLogger().warning("[QuestEngine] Internal quest load failed: " + t.getMessage());
         }
@@ -844,5 +878,172 @@ public final class Engine {
                 .replace("Item", "ITEM_");
 
         return k.toUpperCase(Locale.ROOT);
+    }
+
+    private void rebuildCustomEventIndex() {
+        customEventIndex.clear();
+        Map<String, List<QuestDef>> tmp = new HashMap<>();
+        for (QuestDef def : quests.all()) {
+            if (def == null) continue;
+            CustomEventData c = def.custom;
+            if (c == null) continue;
+            String evt = c.eventClass;
+            if (evt == null) continue;
+            evt = evt.trim();
+            if (evt.isEmpty()) continue;
+            List<QuestDef> list = tmp.computeIfAbsent(evt, k -> new ArrayList<>());
+            list.add(def);
+        }
+        for (Map.Entry<String, List<QuestDef>> e : tmp.entrySet()) {
+            List<QuestDef> list = e.getValue();
+            customEventIndex.put(e.getKey(), list.toArray(new QuestDef[0]));
+        }
+        plugin.getLogger().info("[QuestEngine] Custom event map built " + customEventIndex.size() + " event classes");
+    }
+
+    private void handleCustomDynamic(Event event, QuestDef[] defsForClass) {
+        Map<UUID, List<QuestDef>> byPlayer = new HashMap<>();
+        Map<UUID, Player> players = new HashMap<>();
+
+        for (QuestDef def : defsForClass) {
+            if (def == null || def.custom == null) {
+                continue;
+            }
+            Player p = resolveCustomPlayer(event, def.custom);
+            if (p == null) {
+                continue;
+            }
+            UUID uid = p.getUniqueId();
+            byPlayer.computeIfAbsent(uid, k -> new ArrayList<>()).add(def);
+            players.putIfAbsent(uid, p);
+        }
+
+        if (byPlayer.isEmpty()) {
+            return;
+        }
+
+        Map<String, Object> baseCtx = EventContextMapper.map(event);
+
+        for (Map.Entry<UUID, List<QuestDef>> entry : byPlayer.entrySet()) {
+            UUID uid = entry.getKey();
+            Player player = players.get(uid);
+            if (player == null) continue;
+
+            Object lock = playerLocks.computeIfAbsent(uid, k -> new Object());
+            List<QuestDef> questList = new ArrayList<>(entry.getValue());
+
+            worker.execute(() -> {
+                synchronized (lock) {
+                    for (QuestDef def : questList) {
+                        if (def == null || def.custom == null) continue;
+                        Map<String, Object> ctx = new HashMap<>(baseCtx);
+                        applyCustomCaptures(event, def.custom, ctx);
+                        String eventKey = def.event;
+                        QuestDef[] single = new QuestDef[]{def};
+                        processEventInternal(player, eventKey, event, ctx, single);
+                    }
+                }
+            });
+        }
+    }
+
+    private Player resolveCustomPlayer(Event event, CustomEventData data) {
+        if (data == null) {
+            return EventContextMapper.extractPlayer(event);
+        }
+        String getter = data.playerGetter;
+        if (getter == null || getter.isEmpty()) {
+            return EventContextMapper.extractPlayer(event);
+        }
+        Object o = evalChain(event, getter);
+        if (o instanceof Player) {
+            return (Player) o;
+        }
+        return EventContextMapper.extractPlayer(event);
+    }
+
+    private void applyCustomCaptures(Event event, CustomEventData data, Map<String, Object> ctx) {
+        if (data == null || data.captures == null || data.captures.isEmpty()) {
+            return;
+        }
+        for (Map.Entry<String, String> entry : data.captures.entrySet()) {
+            String key = entry.getKey();
+            String chain = entry.getValue();
+            if (key == null || key.isEmpty() || chain == null || chain.isEmpty()) {
+                continue;
+            }
+            Object val = evalChain(event, chain);
+            if (val != null) {
+                ctx.put(key, val);
+            }
+        }
+    }
+
+    private Object evalChain(Object root, String chain) {
+        if (root == null || chain == null) {
+            return null;
+        }
+        String trimmed = chain.trim();
+        if (trimmed.isEmpty()) {
+            return null;
+        }
+
+        String cacheKey = root.getClass().getName() + "#" + trimmed;
+        Method[] methods = CHAIN_CACHE.get(cacheKey);
+
+        if (methods == null) {
+            String[] parts = trimmed.split("\\.");
+            List<Method> list = new ArrayList<>();
+            Class<?> current = root.getClass();
+
+            for (String part : parts) {
+                String p = part.trim();
+                if (p.isEmpty()) {
+                    return null;
+                }
+                String name = p;
+                int idx = p.indexOf('(');
+                if (idx >= 0) {
+                    name = p.substring(0, idx).trim();
+                }
+                Method m = findNoArgMethod(current, name);
+                if (m == null) {
+                    return null;
+                }
+                try {
+                    m.setAccessible(true);
+                } catch (Throwable ignored) {}
+                list.add(m);
+                current = m.getReturnType();
+            }
+            methods = list.toArray(new Method[0]);
+            CHAIN_CACHE.put(cacheKey, methods);
+        }
+
+        Object current = root;
+        for (Method m : methods) {
+            if (current == null) {
+                return null;
+            }
+            try {
+                current = m.invoke(current);
+            } catch (Throwable ex) {
+                return null;
+            }
+        }
+        return current;
+    }
+
+    private Method findNoArgMethod(Class<?> type, String name) {
+        for (Method m : type.getMethods()) {
+            if (!m.getName().equals(name)) {
+                continue;
+            }
+            if (m.getParameterCount() != 0) {
+                continue;
+            }
+            return m;
+        }
+        return null;
     }
 }

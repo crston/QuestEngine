@@ -1,7 +1,10 @@
 package com.gmail.bobason01.questengine.progress;
 
 import com.gmail.bobason01.questengine.QuestEnginePlugin;
-import com.gmail.bobason01.questengine.storage.*;
+import com.gmail.bobason01.questengine.quest.QuestDef;
+import com.gmail.bobason01.questengine.storage.FileStorage;
+import com.gmail.bobason01.questengine.storage.StorageProvider;
+import com.gmail.bobason01.questengine.storage.YamlStorage;
 import com.gmail.bobason01.questengine.storage.sql.MySQLStorage;
 import com.gmail.bobason01.questengine.storage.sql.SQLiteStorage;
 
@@ -53,10 +56,14 @@ public final class ProgressRepository {
     private StorageProvider buildProvider(QuestEnginePlugin plugin) {
         String mode = plugin.getConfig().getString("storage.mode", "file").toLowerCase(Locale.ROOT);
         switch (mode) {
-            case "yaml": return new YamlStorage(plugin);
-            case "sqlite": return new SQLiteStorage(plugin);
-            case "mysql": return new MySQLStorage(plugin);
-            default: return new FileStorage(plugin);
+            case "yaml":
+                return new YamlStorage(plugin);
+            case "sqlite":
+                return new SQLiteStorage(plugin);
+            case "mysql":
+                return new MySQLStorage(plugin);
+            default:
+                return new FileStorage(plugin);
         }
     }
 
@@ -87,7 +94,8 @@ public final class ProgressRepository {
         for (UUID id : set) {
             try {
                 saveNow(id);
-            } catch (Throwable ignored) {}
+            } catch (Throwable ignored) {
+            }
         }
     }
 
@@ -104,8 +112,31 @@ public final class ProgressRepository {
         return of(id, name).isCompleted(norm(qid));
     }
 
+    /**
+     * 이 퀘스트를 아직 더 시작할 수 있는지 여부
+     * QuestDef.repeat 를 해석해서 PlayerData.canStart 를 사용
+     */
+    public boolean canStart(UUID id, String name, QuestDef def) {
+        if (def == null) {
+            return false;
+        }
+        PlayerData data = of(id, name);
+        return data.canStart(def.id, def.repeat);
+    }
+
     public void start(UUID id, String name, String qid) {
         qid = norm(qid);
+        synchronized (lockFor(id, qid)) {
+            of(id, name).start(qid);
+        }
+        enqueueSave(id);
+    }
+
+    public void start(UUID id, String name, QuestDef def) {
+        if (def == null) {
+            return;
+        }
+        String qid = norm(def.id);
         synchronized (lockFor(id, qid)) {
             of(id, name).start(qid);
         }
@@ -124,6 +155,21 @@ public final class ProgressRepository {
         qid = norm(qid);
         synchronized (lockFor(id, qid)) {
             of(id, name).complete(qid, pts);
+        }
+        enqueueSave(id);
+        setPoints(id, of(id, name).totalPoints());
+    }
+
+    /**
+     * QuestDef.repeat 를 이용한 완료 처리
+     */
+    public void complete(UUID id, String name, QuestDef def) {
+        if (def == null) {
+            return;
+        }
+        String qid = norm(def.id);
+        synchronized (lockFor(id, qid)) {
+            of(id, name).complete(qid, def.points, def.repeat);
         }
         enqueueSave(id);
         setPoints(id, of(id, name).totalPoints());
@@ -173,7 +219,7 @@ public final class ProgressRepository {
     public void reset(UUID id, String name, String qid) {
         qid = norm(qid);
         synchronized (lockFor(id, qid)) {
-            of(id, name).cancel(qid);
+            of(id, name).resetQuest(qid);
         }
         storage.resetQuest(id, qid);
         enqueueSave(id);

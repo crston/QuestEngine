@@ -1,6 +1,7 @@
 package com.gmail.bobason01.questengine.runtime;
 
 import com.gmail.bobason01.questengine.QuestEnginePlugin;
+import com.gmail.bobason01.questengine.quest.CustomEventData;
 import com.gmail.bobason01.questengine.quest.QuestDef;
 import com.gmail.bobason01.questengine.quest.QuestRepository;
 import org.bukkit.Bukkit;
@@ -13,11 +14,6 @@ import org.bukkit.plugin.PluginManager;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * DynamicEventListener
- * - QuestEngine의 동적 이벤트 감지 시스템
- * - 커스텀 이벤트 자동 리스너 등록
- */
 public final class DynamicEventListener {
 
     private final QuestEnginePlugin plugin;
@@ -35,37 +31,56 @@ public final class DynamicEventListener {
     }
 
     public void unregisterAll() {
-        for (Listener l : activeListeners) HandlerList.unregisterAll(l);
+        for (Listener l : activeListeners) {
+            HandlerList.unregisterAll(l);
+        }
         activeListeners.clear();
         listened.clear();
     }
 
     private void registerAll(QuestRepository repo) {
-        final PluginManager pm = Bukkit.getPluginManager();
+        PluginManager pm = Bukkit.getPluginManager();
         int hooked = 0;
 
-        for (String id : repo.ids()) {
-            QuestDef def = repo.get(id);
-            if (def == null) continue;
-            String evt = def.event;
-            if (evt == null || !evt.contains(".")) continue;
-            if (!listened.add(evt.intern())) continue;
+        for (QuestDef def : repo.all()) {
+            if (def == null) {
+                continue;
+            }
+            CustomEventData ce = def.custom;
+            if (ce == null) {
+                continue;
+            }
+            String evt = ce.eventClass;
+            if (evt == null) {
+                continue;
+            }
+            evt = evt.trim();
+            if (evt.isEmpty()) {
+                continue;
+            }
+
+            if (!listened.add(evt)) {
+                continue;
+            }
 
             try {
                 Class<? extends Event> eventClass = loadEventClass(evt);
-                if (eventClass == null) continue;
+                if (eventClass == null) {
+                    continue;
+                }
 
                 EventExecutor exec = (listener, event) -> {
-                    if (eventClass.isInstance(event)) engine.handleDynamic(event);
+                    if (eventClass.isInstance(event)) {
+                        engine.handleDynamic(event);
+                    }
                 };
 
                 Listener listener = new Listener() {};
                 pm.registerEvent(eventClass, listener, org.bukkit.event.EventPriority.MONITOR, exec, plugin, true);
                 activeListeners.add(listener);
                 hooked++;
-
             } catch (Throwable t) {
-                plugin.getLogger().warning("[QuestEngine] Failed to hook event " + evt + ": " + t.getMessage());
+                plugin.getLogger().warning("[QuestEngine] Failed to hook custom event " + evt + ": " + t.getMessage());
             }
         }
 
@@ -78,7 +93,10 @@ public final class DynamicEventListener {
             return CLASS_CACHE.computeIfAbsent(name, key -> {
                 try {
                     Class<?> clz = Class.forName(key);
-                    return Event.class.isAssignableFrom(clz) ? (Class<? extends Event>) clz : null;
+                    if (Event.class.isAssignableFrom(clz)) {
+                        return (Class<? extends Event>) clz;
+                    }
+                    return null;
                 } catch (ClassNotFoundException ex) {
                     return null;
                 }
