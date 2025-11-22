@@ -63,7 +63,7 @@ gui:
     leaderboard: "&6Leaderboard"
   lore:
     list:
-      - "&7%quest_title%"
+      - ""
       - "&aProgress: &f%value%/%target%"
       - "&eReward: &f%reward%"
   confirm:

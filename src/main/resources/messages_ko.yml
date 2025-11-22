@@ -63,7 +63,7 @@ gui:
     leaderboard: "&6랭킹"
   lore:
     list:
-      - "&7%quest_title%"
+      - ""
       - "&a진행도: &f%value%/%target%"
       - "&e보상: &f%reward%"
   confirm:

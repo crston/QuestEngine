@@ -135,23 +135,22 @@ public final class QuestListMenu implements Listener {
 
         for (int i = start; i < end && idx < slots.length; i++) {
             QuestDef d = all.get(i);
+
             List<String> lore = new ArrayList<>();
+            List<String> template = plugin.msg().list("gui.lore.list");
 
-            for (String line : descriptionOf(d)) {
-                lore.add(ChatColor.translateAlternateColorCodes('&',
-                        "&7" + ChatColor.stripColor(line)));
-            }
-
-            lore.add(" ");
-
+            String questTitle = displayNameOf(d);
             int value = plugin.engine().progress().value(p.getUniqueId(), p.getName(), d.id);
-            lore.add(ChatColor.translateAlternateColorCodes('&',
-                    "&aProgress: &f" + value + "/" + d.amount));
-
             String reward = rewardOf(d);
-            if (reward != null && !reward.isBlank()) {
-                lore.add(ChatColor.translateAlternateColorCodes('&',
-                        "&eReward: &f" + ChatColor.stripColor(reward)));
+            if (reward == null) reward = "";
+
+            for (String line : template) {
+                String replaced = line
+                        .replace("%value%", String.valueOf(value))
+                        .replace("%target%", String.valueOf(d.amount))
+                        .replace("%reward%", ChatColor.stripColor(reward));
+
+                lore.add(ChatColor.translateAlternateColorCodes('&', replaced));
             }
 
             lore.add(" ");

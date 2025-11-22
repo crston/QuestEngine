@@ -11,9 +11,7 @@ import com.gmail.bobason01.questengine.party.PartyHook;
 import com.gmail.bobason01.questengine.papi.QuestPapiExpansion;
 import com.gmail.bobason01.questengine.progress.ProgressRepository;
 import com.gmail.bobason01.questengine.quest.QuestRepository;
-import com.gmail.bobason01.questengine.runtime.DynamicEventListener;
-import com.gmail.bobason01.questengine.runtime.Engine;
-import com.gmail.bobason01.questengine.runtime.EventDispatcher;
+import com.gmail.bobason01.questengine.runtime.*;
 import com.gmail.bobason01.questengine.util.Msg;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
@@ -76,6 +74,20 @@ public final class QuestEnginePlugin extends JavaPlugin {
 
         actions = new ActionExecutor(this, msg);
         engine = new Engine(this, quests, progress, actions, msg, asyncPool);
+
+        // Citizens
+        if (getServer().getPluginManager().isPluginEnabled("Citizens")) {
+            getServer().getPluginManager().registerEvents(new CitizensNpcInteractBridge(engine), this);
+        }
+
+        // MythicMobs
+        if (getServer().getPluginManager().isPluginEnabled("MythicMobs")) {
+            getServer().getPluginManager().registerEvents(new MythicmobsNpcInteractBridge(engine), this);
+        }
+
+        // Default (기본 엔티티는 항상 등록)
+        getServer().getPluginManager().registerEvents(new DefaultEntityInteractBridge(engine), this);
+
 
         for (Player p : Bukkit.getOnlinePlayers()) {
             try {
