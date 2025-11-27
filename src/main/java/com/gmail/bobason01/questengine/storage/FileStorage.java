@@ -4,8 +4,16 @@ import com.gmail.bobason01.questengine.QuestEnginePlugin;
 import com.gmail.bobason01.questengine.progress.PlayerData;
 
 import java.io.*;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.*;
 
+/**
+ * FileStorage (Optimized)
+ * - Binary Format: Compact & Fast
+ * - Atomic Write: Prevents data corruption on crash
+ * - Added repeat_count support
+ */
 public final class FileStorage implements StorageProvider {
 
     private final QuestEnginePlugin plugin;
@@ -25,22 +33,37 @@ public final class FileStorage implements StorageProvider {
     public PlayerData load(UUID id, String name) {
         File f = fileOf(id);
         if (!f.exists()) return new PlayerData(id, name);
+
         try (DataInputStream in = new DataInputStream(new BufferedInputStream(new FileInputStream(f)))) {
             PlayerData data = new PlayerData(id, name);
             int count = in.readInt();
+
             for (int i = 0; i < count; i++) {
                 String qid = in.readUTF();
                 boolean active = in.readBoolean();
                 boolean completed = in.readBoolean();
                 int value = in.readInt();
                 int points = in.readInt();
+                int repeatCount = 0;
+                if (in.available() > 0) {
+                    try { repeatCount = in.readInt(); } catch (EOFException ignored) {}
+                }
+
                 if (active) data.start(qid);
-                if (completed) data.complete(qid, points);
                 if (value > 0) data.add(qid, value);
+
+                if (repeatCount > 0) data.setRepeatCount(qid, repeatCount);
+
+                if (completed) {
+                    // 완료 상태 복구 (포인트 포함)
+                    data.complete(qid, points);
+                    // 반복 횟수가 0인데 완료된 상태면 최소 1로 보정
+                    if (data.getRepeatCount(qid) == 0) data.setRepeatCount(qid, 1);
+                }
             }
             return data;
         } catch (Throwable t) {
-            plugin.getLogger().warning("[FileStorage] load failed for " + id + ": " + t.getMessage());
+            plugin.getLogger().warning("[FileStorage] Load failed for " + id + ": " + t.getMessage());
             return new PlayerData(id, name);
         }
     }
@@ -48,19 +71,34 @@ public final class FileStorage implements StorageProvider {
     @Override
     public void save(PlayerData d) {
         File f = fileOf(d.getId());
-        try (DataOutputStream out = new DataOutputStream(new BufferedOutputStream(new FileOutputStream(f)))) {
-            Set<String> all = new HashSet<>(d.activeIds());
+        File tmp = new File(folder, d.getId() + ".dat.tmp");
+
+        try (DataOutputStream out = new DataOutputStream(new BufferedOutputStream(new FileOutputStream(tmp)))) {
+            Set<String> all = new HashSet<>();
+            all.addAll(d.activeIds());
             all.addAll(d.completedIds());
+
             out.writeInt(all.size());
             for (String qid : all) {
                 out.writeUTF(qid);
                 out.writeBoolean(d.isActive(qid));
                 out.writeBoolean(d.isCompleted(qid));
                 out.writeInt(d.valueOf(qid));
-                out.writeInt(d.isCompleted(qid) ? d.pointsOf(qid) : 0);
+                out.writeInt(d.pointsOf(qid));
+                // [Added] Repeat Count
+                out.writeInt(d.getRepeatCount(qid));
             }
+
+            // Flush & Close before move
+            out.flush();
+            out.close();
+
+            // Atomic Move (Safe Replace)
+            Files.move(tmp.toPath(), f.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+
         } catch (Throwable t) {
-            plugin.getLogger().warning("[FileStorage] save failed for " + d.getId() + ": " + t.getMessage());
+            plugin.getLogger().warning("[FileStorage] Save failed for " + d.getId() + ": " + t.getMessage());
+            if (tmp.exists()) tmp.delete(); // cleanup
         }
     }
 
@@ -69,17 +107,22 @@ public final class FileStorage implements StorageProvider {
         Map<UUID, Integer> map = new HashMap<>();
         File[] files = folder.listFiles((dir, name) -> name.endsWith(".dat"));
         if (files == null) return map;
+
         for (File f : files) {
             try (DataInputStream in = new DataInputStream(new BufferedInputStream(new FileInputStream(f)))) {
                 UUID id = UUID.fromString(f.getName().replace(".dat", ""));
                 int total = 0;
                 int count = in.readInt();
                 for (int i = 0; i < count; i++) {
-                    in.readUTF();
-                    in.readBoolean();
+                    in.readUTF(); // qid
+                    in.readBoolean(); // active
                     boolean completed = in.readBoolean();
-                    in.readInt();
+                    in.readInt(); // value
                     int pts = in.readInt();
+
+                    // repeatCount skip (if exists)
+                    if (in.available() >= 4) in.skipBytes(4);
+
                     if (completed) total += pts;
                 }
                 map.put(id, total);
@@ -89,11 +132,7 @@ public final class FileStorage implements StorageProvider {
     }
 
     @Override
-    public void preloadAll() {
-        File[] files = folder.listFiles((dir, name) -> name.endsWith(".dat"));
-        if (files == null) return;
-        // No op here. Higher layer caches loaded data on demand.
-    }
+    public void preloadAll() {}
 
     @Override
     public void reset(UUID id) {
@@ -104,12 +143,10 @@ public final class FileStorage implements StorageProvider {
     @Override
     public void resetQuest(UUID id, String questId) {
         PlayerData d = load(id, "unknown");
-        d.cancel(questId);
+        d.resetQuest(questId);
         save(d);
     }
 
     @Override
-    public void close() {
-        // no resources
-    }
+    public void close() {}
 }

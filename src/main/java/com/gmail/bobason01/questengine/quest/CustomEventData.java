@@ -29,15 +29,6 @@ public final class CustomEventData {
         this.captures = (captures == null || captures.isEmpty()) ? EMPTY_MAP : captures;
     }
 
-    /**
-     * YAML 로부터 CustomEventData를 파싱한다.
-     * 구조 예시:
-     * event: org.bukkit.event.player.PlayerJoinEvent
-     * player_variable: getPlayer()
-     * variables_to_capture:
-     *   - "%player_name%;getPlayer().getName()"
-     *   - "%world%;getPlayer().getWorld().getName()"
-     */
     public static CustomEventData load(ConfigurationSection sec) {
         if (sec == null) return new CustomEventData("", "getPlayer()", EMPTY_MAP);
 

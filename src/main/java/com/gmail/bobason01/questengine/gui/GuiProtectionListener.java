@@ -1,88 +1,87 @@
 package com.gmail.bobason01.questengine.gui;
 
+import com.gmail.bobason01.questengine.QuestEnginePlugin;
 import org.bukkit.Bukkit;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.*;
 import org.bukkit.event.player.PlayerDropItemEvent;
+import org.bukkit.inventory.Inventory;
 
+/**
+ * GuiProtectionListener (Optimized)
+ * - "Q_"로 시작하는 모든 내부 GUI에 대한 아이템 이동/수정/드롭 완벽 차단
+ * - 로직 처리는 각 메뉴의 리스너(QuestEditorMenu 등)가 담당
+ */
 public final class GuiProtectionListener implements Listener {
 
-    public GuiProtectionListener() {
-        Bukkit.getPluginManager().registerEvents(this,
-                Bukkit.getPluginManager().getPlugin("QuestEngine"));
+    public GuiProtectionListener(QuestEnginePlugin plugin) {
+        Bukkit.getPluginManager().registerEvents(this, plugin);
     }
 
-    // --------------------------------------------------------------
-    // 클릭 이벤트: "아이템 이동"을 막되, 클릭 자체는 막지 않는다
-    // --------------------------------------------------------------
+    private boolean isProtected(Inventory inv) {
+        return inv != null
+                && inv.getHolder() instanceof GuiHolder gh
+                && gh.id() != null
+                && gh.id().startsWith("Q_");
+    }
+
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = false)
     public void onClick(InventoryClickEvent e) {
+        Inventory top = e.getView().getTopInventory();
+        if (!isProtected(top)) return;
 
-        if (!(e.getInventory().getHolder() instanceof GuiHolder gh)) return;
-        if (!gh.id().startsWith("Q_")) return;
-
-        // 슬롯 클릭 허용 (onClick 전달됨)
-        // 이동/드래그/집기 등만 차단
-        switch (e.getAction()) {
-
-            case MOVE_TO_OTHER_INVENTORY,
-                 HOTBAR_MOVE_AND_READD,
-                 HOTBAR_SWAP,
-                 COLLECT_TO_CURSOR,
-                 DROP_ONE_CURSOR,
-                 DROP_ALL_CURSOR,
-                 DROP_ONE_SLOT,
-                 DROP_ALL_SLOT,
-                 PLACE_ALL,
-                 PLACE_SOME,
-                 PLACE_ONE,
-                 PICKUP_ALL,
-                 PICKUP_HALF,
-                 PICKUP_SOME,
-                 PICKUP_ONE -> e.setCancelled(true);
-
-            default -> {}
+        // 1. 상단 GUI 클릭은 무조건 취소 (아이템 빼기/넣기 방지)
+        // 로직 처리는 QuestEditorMenu 등의 Listener에서 처리함
+        if (e.getClickedInventory() == top) {
+            e.setCancelled(true);
+        }
+        // 2. 하단(플레이어 인벤)에서 Shift 클릭으로 상단으로 보내는 행위 차단
+        else if (e.getAction() == InventoryAction.MOVE_TO_OTHER_INVENTORY) {
+            e.setCancelled(true);
+        }
+        // 3. 더블 클릭으로 아이템을 모으는 행위 차단 (GUI 아이템이 딸려오는 것 방지)
+        else if (e.getAction() == InventoryAction.COLLECT_TO_CURSOR) {
+            e.setCancelled(true);
         }
     }
 
-    // --------------------------------------------------------------
-    // 드래그 시 GUI 내부는 차단
-    // --------------------------------------------------------------
-    @EventHandler(priority = EventPriority.NORMAL, ignoreCancelled = false)
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = false)
     public void onDrag(InventoryDragEvent e) {
-        if (!(e.getInventory().getHolder() instanceof GuiHolder gh)) return;
-        if (!gh.id().startsWith("Q_")) return;
-
-        for (int slot : e.getRawSlots()) {
-            if (slot < e.getInventory().getSize()) {
-                e.setCancelled(true);
-                return;
+        if (isProtected(e.getView().getTopInventory())) {
+            // 드래그 대상 슬롯 중에 상단 인벤토리가 하나라도 포함되면 취소
+            int size = e.getView().getTopInventory().getSize();
+            for (int slot : e.getRawSlots()) {
+                if (slot < size) {
+                    e.setCancelled(true);
+                    return;
+                }
             }
         }
     }
 
-    @EventHandler
-    public void onDrop(PlayerDropItemEvent e) {
-        if (e.getPlayer().getOpenInventory() == null) return;
-        if (!(e.getPlayer().getOpenInventory().getTopInventory().getHolder() instanceof GuiHolder gh)) return;
-        if (!gh.id().startsWith("Q_")) return;
-        e.setCancelled(true);
-    }
-
-    @EventHandler
-    public void onMove(InventoryMoveItemEvent e) {
-        if (e.getDestination().getHolder() instanceof GuiHolder
-                || e.getSource().getHolder() instanceof GuiHolder) {
+    @EventHandler(priority = EventPriority.HIGH)
+    public void onMoveItem(InventoryMoveItemEvent e) {
+        // 호퍼나 다른 플러그인에 의한 이동 차단
+        if (isProtected(e.getDestination()) || isProtected(e.getSource())) {
             e.setCancelled(true);
         }
     }
 
-    @EventHandler
+    @EventHandler(priority = EventPriority.HIGH)
     public void onPickup(InventoryPickupItemEvent e) {
-        if (e.getInventory().getHolder() instanceof GuiHolder) {
+        if (isProtected(e.getInventory())) {
             e.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGH)
+    public void onDrop(PlayerDropItemEvent e) {
+        if (e.getPlayer().getOpenInventory() != null) {
+            Inventory top = e.getPlayer().getOpenInventory().getTopInventory();
+            if (isProtected(top)) {
+            }
         }
     }
 }

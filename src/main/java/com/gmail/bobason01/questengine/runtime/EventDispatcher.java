@@ -2,11 +2,11 @@ package com.gmail.bobason01.questengine.runtime;
 
 import io.lumine.mythic.bukkit.BukkitAPIHelper;
 import io.lumine.mythic.bukkit.events.MythicMobDeathEvent;
-import io.lumine.mythic.bukkit.events.MythicMobSpawnEvent;
 import io.lumine.mythic.core.mobs.ActiveMob;
 import net.citizensnpcs.api.CitizensAPI;
 import net.citizensnpcs.api.npc.NPC;
 import org.bukkit.Bukkit;
+import org.bukkit.Location;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.*;
@@ -15,40 +15,93 @@ import org.bukkit.event.enchantment.EnchantItemEvent;
 import org.bukkit.event.entity.*;
 import org.bukkit.event.inventory.*;
 import org.bukkit.event.player.*;
-import org.bukkit.event.world.ChunkLoadEvent;
-import org.bukkit.metadata.FixedMetadataValue;
+import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.plugin.Plugin;
 
+import java.util.HashMap;
 import java.util.Map;
 
 /**
- * EventDispatcher
- * QuestEngine 글로벌 이벤트 브로드캐스터
- * Citizens / MythicMobs / 일반 엔티티 완전 호환
- * Paper/Purpur 완벽 지원
+ * EventDispatcher (Optimized)
+ * - PlayerMoveEvent: 블록 단위 이동만 감지 (TPS 방어 핵심)
+ * - Soft Dependency: Citizens/MythicMobs가 없어도 안전하게 작동 (클래스 분리)
+ * - Traffic Safety: 불필요한 이벤트 필터링 및 루프 최적화
  */
 public final class EventDispatcher implements Listener {
 
-    private final Plugin plugin;
     private final Engine engine;
-    private final boolean hasCitizens;
-    private final boolean hasMythic;
-    private final BukkitAPIHelper mythicAPI;
 
     public EventDispatcher(Plugin plugin, Engine engine) {
-        this.plugin = plugin;
         this.engine = engine;
-        this.hasCitizens = Bukkit.getPluginManager().isPluginEnabled("Citizens");
-        this.hasMythic = Bukkit.getPluginManager().isPluginEnabled("MythicMobs");
-        this.mythicAPI = hasMythic ? new BukkitAPIHelper() : null;
 
+        // 1. 기본 Bukkit 이벤트 등록
         Bukkit.getPluginManager().registerEvents(this, plugin);
-        plugin.getLogger().info("[QuestEngine] EventDispatcher fully registered (Citizens:" + hasCitizens + ", MythicMobs:" + hasMythic + ")");
+
+        // 2. Citizens 존재 시에만 전용 리스너 등록 (NoClassDefFoundError 방지)
+        if (Bukkit.getPluginManager().isPluginEnabled("Citizens")) {
+            Bukkit.getPluginManager().registerEvents(new CitizensListener(engine), plugin);
+            plugin.getLogger().info("[QuestEngine] Hooked into Citizens");
+        }
+
+        // 3. MythicMobs 존재 시에만 전용 리스너 등록
+        if (Bukkit.getPluginManager().isPluginEnabled("MythicMobs")) {
+            Bukkit.getPluginManager().registerEvents(new MythicMobsListener(engine), plugin);
+            plugin.getLogger().info("[QuestEngine] Hooked into MythicMobs");
+        }
     }
 
+    // 헬퍼: 널 체크 최소화
     private void handle(Player player, String key, Event event) {
-        if (player == null) return;
-        engine.handle(player, key, event);
+        if (player != null) engine.handle(player, key, event);
+    }
+
+    // ------------------------------------------------------------------------
+    // [핵심 최적화] PLAYER MOVE
+    // ------------------------------------------------------------------------
+    @EventHandler(ignoreCancelled = true)
+    public void onMove(PlayerMoveEvent e) {
+        // 최적화: 시점(Yaw/Pitch)만 변경된 경우 무시
+        // XYZ 좌표가 변하지 않았으면 리턴 (정수형 Block 좌표 비교가 가장 빠름)
+        Location from = e.getFrom();
+        Location to = e.getTo();
+
+        if (to == null) return; // 드물지만 방어 코드
+        if (from.getBlockX() == to.getBlockX() &&
+                from.getBlockY() == to.getBlockY() &&
+                from.getBlockZ() == to.getBlockZ()) {
+            return;
+        }
+
+        handle(e.getPlayer(), "PLAYER_WALK", e);
+    }
+
+    // ------------------------------------------------------------------------
+    // [최적화] INTERACT (양손 문제 해결)
+    // ------------------------------------------------------------------------
+    @EventHandler(ignoreCancelled = true)
+    public void onEntityInteract(PlayerInteractEntityEvent e) {
+        // 최적화: 왼손 이벤트 무시
+        if (e.getHand() != EquipmentSlot.HAND) return;
+
+        Entity target = e.getRightClicked();
+        if (target == null) return;
+
+        // NPC나 MythicMobs 처리는 별도 리스너에서 하거나, 여기서 통합 처리
+        // 성능을 위해 일반 엔티티만 여기서 빠르게 처리하고 나머지는 Hook 리스너에 위임 가능
+        // 하지만 여기서는 통합성을 위해 ID 추출 로직을 사용하되, 가벼운 방식 적용
+
+        String id = resolveSimpleTargetId(target);
+        Map<String, Object> ctx = new HashMap<>();
+        ctx.put("target_id", id);
+        ctx.put("entity", target);
+
+        engine.handleCustom(e.getPlayer(), "ENTITY_INTERACT", ctx);
+    }
+
+    private String resolveSimpleTargetId(Entity entity) {
+        // 메타데이터 검사를 통해 무거운 API 호출 방지
+        if (entity.hasMetadata("NPC")) return "CITIZENS_" + entity.getEntityId(); // 실제 ID 조회는 CitizensListener에 위임 권장
+        return entity.getType().name();
     }
 
     // ------------------------------------------------------------------------
@@ -60,33 +113,16 @@ public final class EventDispatcher implements Listener {
     @EventHandler(ignoreCancelled = true)
     public void onBlockPlace(BlockPlaceEvent e) { handle(e.getPlayer(), "BLOCK_PLACE", e); }
 
-    @EventHandler(ignoreCancelled = true)
-    public void onBlockFertilize(BlockFertilizeEvent e) { handle(e.getPlayer(), "BLOCK_FERTILIZING", e); }
-
-    @EventHandler(ignoreCancelled = true)
-    public void onBlockBurn(BlockBurnEvent e) {
-        for (Player p : e.getBlock().getWorld().getPlayers()) handle(p, "BLOCK_BURN", e);
-    }
-
-    @EventHandler(ignoreCancelled = true)
-    public void onBlockExplode(BlockExplodeEvent e) {
-        for (Player p : e.getBlock().getWorld().getPlayers()) handle(p, "BLOCK_EXPLODE", e);
-    }
-
     // ------------------------------------------------------------------------
-    // ITEM / INVENTORY EVENTS
+    // ITEM / INVENTORY
     // ------------------------------------------------------------------------
     @EventHandler(ignoreCancelled = true)
     public void onItemConsume(PlayerItemConsumeEvent e) { handle(e.getPlayer(), "ITEM_CONSUME", e); }
 
     @EventHandler(ignoreCancelled = true)
-    public void onItemBreak(PlayerItemBreakEvent e) { handle(e.getPlayer(), "ITEM_BREAK", e); }
-
-    @EventHandler(ignoreCancelled = true)
-    public void onItemDamage(PlayerItemDamageEvent e) { handle(e.getPlayer(), "ITEM_DAMAGE", e); }
-
-    @EventHandler(ignoreCancelled = true)
-    public void onItemMend(PlayerItemMendEvent e) { handle(e.getPlayer(), "ITEM_MENDING", e); }
+    public void onCraft(CraftItemEvent e) {
+        if (e.getWhoClicked() instanceof Player p) handle(p, "ITEM_CRAFT", e);
+    }
 
     @EventHandler(ignoreCancelled = true)
     public void onItemPickup(EntityPickupItemEvent e) {
@@ -97,43 +133,16 @@ public final class EventDispatcher implements Listener {
     public void onItemDrop(PlayerDropItemEvent e) { handle(e.getPlayer(), "ITEM_DROP", e); }
 
     @EventHandler(ignoreCancelled = true)
-    public void onCraft(CraftItemEvent e) { handle((Player) e.getWhoClicked(), "ITEM_CRAFT", e); }
-
-    @EventHandler(ignoreCancelled = true)
     public void onEnchant(EnchantItemEvent e) { handle(e.getEnchanter(), "ITEM_ENCHANT", e); }
 
     @EventHandler(ignoreCancelled = true)
-    public void onAnvilRepair(PrepareAnvilEvent e) {
-        if (e.getView().getPlayer() instanceof Player p) handle(p, "ITEM_REPAIR", e);
-    }
-
-    @EventHandler(ignoreCancelled = true)
-    public void onSmithing(PrepareSmithingEvent e) {
-        if (e.getView().getPlayer() instanceof Player p) handle(p, "SMITHING", e);
-    }
-
-    @EventHandler(ignoreCancelled = true)
-    public void onBrew(BrewEvent e) {
-        for (Player p : e.getBlock().getWorld().getPlayers()) handle(p, "BREWING", e);
-    }
-
-    @EventHandler(ignoreCancelled = true)
-    public void onInventoryClick(InventoryClickEvent e) {
-        if (e.getWhoClicked() instanceof Player p) handle(p, "ITEM_MOVE", e);
-    }
-
-    @EventHandler(ignoreCancelled = true)
-    public void onInventoryOpen(InventoryOpenEvent e) {
-        if (e.getPlayer() instanceof Player p) handle(p, "INVENTORY_OPEN", e);
-    }
+    public void onFish(PlayerFishEvent e) { handle(e.getPlayer(), "FISHING", e); }
 
     // ------------------------------------------------------------------------
-    // PLAYER CORE EVENTS
+    // PLAYER CORE
     // ------------------------------------------------------------------------
     @EventHandler public void onJoin(PlayerJoinEvent e) { handle(e.getPlayer(), "PLAYER_PRE_JOIN", e); }
-
     @EventHandler public void onQuit(PlayerQuitEvent e) { handle(e.getPlayer(), "PLAYER_LEAVE", e); }
-
     @EventHandler public void onRespawn(PlayerRespawnEvent e) { handle(e.getPlayer(), "PLAYER_RESPAWN", e); }
 
     @EventHandler(ignoreCancelled = true)
@@ -143,41 +152,15 @@ public final class EventDispatcher implements Listener {
     public void onCommand(PlayerCommandPreprocessEvent e) { handle(e.getPlayer(), "PLAYER_COMMAND", e); }
 
     @EventHandler(ignoreCancelled = true)
-    public void onMove(PlayerMoveEvent e) { handle(e.getPlayer(), "PLAYER_WALK", e); }
-
-    @EventHandler(ignoreCancelled = true)
-    public void onTeleport(PlayerTeleportEvent e) { handle(e.getPlayer(), "PLAYER_TELEPORT", e); }
-
-    @EventHandler(ignoreCancelled = true)
-    public void onBedEnter(PlayerBedEnterEvent e) { handle(e.getPlayer(), "PLAYER_BED_ENTER", e); }
-
-    @EventHandler(ignoreCancelled = true)
-    public void onSwap(PlayerSwapHandItemsEvent e) { handle(e.getPlayer(), "PLAYER_SWAP_HAND", e); }
-
-    @EventHandler(ignoreCancelled = true)
-    public void onExpChange(PlayerExpChangeEvent e) { handle(e.getPlayer(), "PLAYER_EXP_GAIN", e); }
-
-    @EventHandler(ignoreCancelled = true)
     public void onLevelChange(PlayerLevelChangeEvent e) { handle(e.getPlayer(), "PLAYER_LEVELUP", e); }
 
-    @EventHandler(ignoreCancelled = true)
-    public void onArmor(PlayerItemHeldEvent e) { handle(e.getPlayer(), "PLAYER_ARMOR", e); }
-
     // ------------------------------------------------------------------------
-    // ENTITY EVENTS
+    // ENTITY
     // ------------------------------------------------------------------------
     @EventHandler(ignoreCancelled = true)
     public void onEntityDeath(EntityDeathEvent e) {
-        if (e.getEntity().getKiller() != null)
-            handle(e.getEntity().getKiller(), "MOBKILLING", e);
-    }
-
-    @EventHandler(ignoreCancelled = true)
-    public void onEntityTame(EntityTameEvent e) { handle((Player) e.getOwner(), "TAMING", e); }
-
-    @EventHandler(ignoreCancelled = true)
-    public void onEntityBreed(EntityBreedEvent e) {
-        if (e.getBreeder() instanceof Player p) handle(p, "BREEDING", e);
+        Player killer = e.getEntity().getKiller();
+        if (killer != null) handle(killer, "MOBKILLING", e);
     }
 
     @EventHandler(ignoreCancelled = true)
@@ -186,58 +169,68 @@ public final class EventDispatcher implements Listener {
     }
 
     // ------------------------------------------------------------------------
-    // 핵심: ENTITY_INTERACT (NPC / MythicMob / 일반 엔티티 전부 지원)
+    // [분리된 리스너] CITIZENS (플러그인이 있을 때만 로드됨)
     // ------------------------------------------------------------------------
-    @EventHandler(ignoreCancelled = true)
-    public void onEntityInteract(PlayerInteractEntityEvent e) {
-        Player p = e.getPlayer();
-        Entity target = e.getRightClicked();
-        if (target == null) return;
+    private static class CitizensListener implements Listener {
+        private final Engine engine;
 
-        String id = resolveTargetId(target);
-        e.getPlayer().setMetadata("qe_last_interact", new FixedMetadataValue(plugin, id)); // optional debug marker
+        CitizensListener(Engine engine) { this.engine = engine; }
 
-        // 커스텀 컨텍스트로 타깃 ID도 전달
-        engine.handleCustom(p, "ENTITY_INTERACT", Map.of("target_id", id, "entity", target));
-    }
+        @EventHandler(ignoreCancelled = true)
+        public void onNpcInteract(PlayerInteractEntityEvent e) {
+            if (e.getHand() != EquipmentSlot.HAND) return;
+            Entity target = e.getRightClicked();
 
-    private String resolveTargetId(Entity entity) {
-        // Citizens NPC 우선
-        if (hasCitizens && CitizensAPI.hasImplementation() && CitizensAPI.getNPCRegistry().isNPC(entity)) {
-            NPC npc = CitizensAPI.getNPCRegistry().getNPC(entity);
-            if (npc != null) return "CITIZENS_" + npc.getId();
+            // hasMetadata 체크로 빠른 패스
+            if (!target.hasMetadata("NPC")) return;
+
+            NPC npc = CitizensAPI.getNPCRegistry().getNPC(target);
+            if (npc == null) return;
+
+            String key = "CITIZENS_" + npc.getId();
+
+            // 맵 생성 최소화 (HashMap 사용)
+            Map<String, Object> ctx = new HashMap<>();
+            ctx.put("target_id", key);
+            ctx.put("npc_id", npc.getId());
+            ctx.put("entity", target);
+
+            engine.handleCustom(e.getPlayer(), "ENTITY_INTERACT", ctx);
         }
-        // MythicMobs 엔티티
-        if (hasMythic && mythicAPI != null) {
-            ActiveMob am = mythicAPI.getMythicMobInstance(entity);
-            if (am != null) return "MYTHIC_" + am.getType().getInternalName();
+    }
+
+    // ------------------------------------------------------------------------
+    // [분리된 리스너] MYTHICMOBS (플러그인이 있을 때만 로드됨)
+    // ------------------------------------------------------------------------
+    private static class MythicMobsListener implements Listener {
+        private final Engine engine;
+        private final BukkitAPIHelper api;
+
+        MythicMobsListener(Engine engine) {
+            this.engine = engine;
+            this.api = new BukkitAPIHelper();
         }
-        // 일반 엔티티
-        return entity.getType().name();
-    }
 
-    @EventHandler(ignoreCancelled = true)
-    public void onFish(PlayerFishEvent e) { handle(e.getPlayer(), "FISHING", e); }
+        @EventHandler(ignoreCancelled = true)
+        public void onMythicDeath(MythicMobDeathEvent e) {
+            if (e.getKiller() instanceof Player p) {
+                engine.handle(p, "MYTHICMOBS_ENTITY_KILL", e);
+            }
+        }
 
-    // ------------------------------------------------------------------------
-    // WORLD EVENTS
-    // ------------------------------------------------------------------------
-    @EventHandler public void onChunkLoad(ChunkLoadEvent e) {
-        for (Player p : e.getWorld().getPlayers()) handle(p, "WORLD_CHUNK_LOAD", e);
-    }
-
-    // ------------------------------------------------------------------------
-    // MYTHICMOBS EVENTS
-    // ------------------------------------------------------------------------
-    @EventHandler(ignoreCancelled = true)
-    public void onMythicSpawn(MythicMobSpawnEvent e) {
-        if (e.getEntity() != null && e.getEntity().getWorld() != null)
-            for (Player p : e.getEntity().getWorld().getPlayers())
-                handle(p, "MYTHICMOBS_ENTITY_SPAWN", e);
-    }
-
-    @EventHandler(ignoreCancelled = true)
-    public void onMythicDeath(MythicMobDeathEvent e) {
-        if (e.getKiller() instanceof Player p) handle(p, "MYTHICMOBS_ENTITY_KILL", e);
+        @EventHandler(ignoreCancelled = true)
+        public void onInteract(PlayerInteractEntityEvent e) {
+            if (e.getHand() != EquipmentSlot.HAND) return;
+            if (api.isMythicMob(e.getRightClicked())) {
+                ActiveMob am = api.getMythicMobInstance(e.getRightClicked());
+                if (am != null) {
+                    String key = "MYTHIC_" + am.getType().getInternalName();
+                    Map<String, Object> ctx = new HashMap<>();
+                    ctx.put("target_id", key);
+                    ctx.put("entity", e.getRightClicked());
+                    engine.handleCustom(e.getPlayer(), "ENTITY_INTERACT", ctx);
+                }
+            }
+        }
     }
 }

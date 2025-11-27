@@ -11,7 +11,9 @@ import com.gmail.bobason01.questengine.party.PartyHook;
 import com.gmail.bobason01.questengine.papi.QuestPapiExpansion;
 import com.gmail.bobason01.questengine.progress.ProgressRepository;
 import com.gmail.bobason01.questengine.quest.QuestRepository;
-import com.gmail.bobason01.questengine.runtime.*;
+import com.gmail.bobason01.questengine.runtime.DynamicEventListener;
+import com.gmail.bobason01.questengine.runtime.Engine;
+import com.gmail.bobason01.questengine.runtime.EventDispatcher;
 import com.gmail.bobason01.questengine.util.Msg;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
@@ -29,7 +31,9 @@ import java.util.jar.JarFile;
 
 /**
  * QuestEnginePlugin
- * 기존 구조에 퀘스트 편집기 통합
+ * - ProgressRepository API 변경 대응 (preload -> of)
+ * - EventDispatcher 통합으로 인한 중복 리스너 등록 제거
+ * - 스레드 풀 및 리소스 정리 최적화
  */
 public final class QuestEnginePlugin extends JavaPlugin {
 
@@ -47,9 +51,11 @@ public final class QuestEnginePlugin extends JavaPlugin {
         long start = System.currentTimeMillis();
         getLogger().info("[QuestEngine] Initializing...");
 
+        // 1. Config & Message
         saveDefaultConfig();
         msg = new Msg(this);
 
+        // 2. Quest Folder Setup
         File questDir = new File(getDataFolder(), getConfig().getString("quests.folder", "quests"));
         if (!questDir.exists() && !questDir.mkdirs()) {
             getLogger().warning("[QuestEngine] Failed to create quest folder: " + questDir.getAbsolutePath());
@@ -61,11 +67,13 @@ public final class QuestEnginePlugin extends JavaPlugin {
             getLogger().warning("[QuestEngine] Failed to extract default quests: " + e.getMessage());
         }
 
+        // 3. Core Components Init
         quests = new QuestRepository(this, questDir);
         progress = new ProgressRepository(this);
 
+        // 4. Thread Pool (CPU Core 기반 최적화)
         asyncPool = Executors.newFixedThreadPool(
-                Math.max(2, Runtime.getRuntime().availableProcessors() / 2),
+                Math.max(2, Runtime.getRuntime().availableProcessors()), // 코어 수만큼 할당
                 r -> {
                     Thread t = new Thread(r, "QuestEngine-AsyncPool");
                     t.setDaemon(true);
@@ -75,29 +83,20 @@ public final class QuestEnginePlugin extends JavaPlugin {
         actions = new ActionExecutor(this, msg);
         engine = new Engine(this, quests, progress, actions, msg, asyncPool);
 
-        // Citizens
-        if (getServer().getPluginManager().isPluginEnabled("Citizens")) {
-            getServer().getPluginManager().registerEvents(new CitizensNpcInteractBridge(engine), this);
-        }
-
-        // MythicMobs
-        if (getServer().getPluginManager().isPluginEnabled("MythicMobs")) {
-            getServer().getPluginManager().registerEvents(new MythicmobsNpcInteractBridge(engine), this);
-        }
-
-        // Default (기본 엔티티는 항상 등록)
-        getServer().getPluginManager().registerEvents(new DefaultEntityInteractBridge(engine), this);
-
-
+        // 5. Preload Online Players
         for (Player p : Bukkit.getOnlinePlayers()) {
             try {
-                progress.preload(p.getUniqueId());
+                // preload() -> of() : 데이터를 로드하고 캐시에 올립니다.
+                progress.of(p.getUniqueId(), p.getName());
                 getLogger().info("[QuestEngine] Cached progress for " + p.getName());
             } catch (Throwable t) {
-                getLogger().warning("[QuestEngine] Failed to preload " + p.getName() + ": " + t.getMessage());
+                getLogger().warning("[QuestEngine] Failed to load data for " + p.getName() + ": " + t.getMessage());
             }
         }
 
+        // 6. Event Listeners (지연 등록)
+        // 별도의 Bridge 클래스(CitizensNpcInteractBridge 등) 등록 제거
+        // 이유: EventDispatcher 내부에서 이미 조건부로 리스너를 등록하고 처리하므로 중복 등록 방지
         Bukkit.getScheduler().runTask(this, () -> {
             try {
                 new EventDispatcher(this, engine);
@@ -108,6 +107,7 @@ public final class QuestEnginePlugin extends JavaPlugin {
             }
         });
 
+        // 7. Hooks
         PartyHook.init(this, getConfig());
 
         if (Bukkit.getPluginManager().isPluginEnabled("PlaceholderAPI")) {
@@ -119,6 +119,7 @@ public final class QuestEnginePlugin extends JavaPlugin {
             }
         }
 
+        // 8. GUI & Commands
         gui = new QuestGuiManager(this);
         editorMenu = new QuestEditorMenu(this);
 
@@ -136,10 +137,20 @@ public final class QuestEnginePlugin extends JavaPlugin {
         getLogger().info("[QuestEngine] Shutting down...");
 
         try {
+            // 이벤트 리스너 해제
             HandlerList.unregisterAll(this);
+
+            // 엔진 종료
             if (engine != null) engine.shutdown();
+
+            // 데이터 저장 및 DB 연결 종료
             if (progress != null) progress.close();
-            if (asyncPool != null && !asyncPool.isShutdown()) asyncPool.shutdownNow();
+
+            // 스레드 풀 강제 종료
+            if (asyncPool != null && !asyncPool.isShutdown()) {
+                asyncPool.shutdownNow();
+            }
+
         } catch (Throwable t) {
             getLogger().warning("[QuestEngine] Exception during shutdown: " + t.getMessage());
         }
@@ -147,34 +158,17 @@ public final class QuestEnginePlugin extends JavaPlugin {
         getLogger().info("[QuestEngine] Disabled safely.");
     }
 
-    public Engine engine() {
-        return engine;
-    }
+    // --- Accessors ---
 
-    public QuestRepository quests() {
-        return quests;
-    }
+    public Engine engine() { return engine; }
+    public QuestRepository quests() { return quests; }
+    public ProgressRepository progress() { return progress; }
+    public Msg msg() { return msg; }
+    public QuestGuiManager gui() { return gui; }
+    public ExecutorService asyncPool() { return asyncPool; }
+    public QuestEditorMenu editorMenu() { return editorMenu; }
 
-    public ProgressRepository progress() {
-        return progress;
-    }
-
-    public Msg msg() {
-        return msg;
-    }
-
-    public QuestGuiManager gui() {
-        return gui;
-    }
-
-    public ExecutorService asyncPool() {
-        return asyncPool;
-    }
-
-    public QuestEditorMenu editorMenu() {
-        return editorMenu;
-    }
-
+    // 비동기 작업 헬퍼
     public void runAsync(Runnable task) {
         if (asyncPool == null || asyncPool.isShutdown()) {
             getLogger().warning("[QuestEngine] Async pool not available, running sync.");
@@ -183,6 +177,8 @@ public final class QuestEnginePlugin extends JavaPlugin {
         }
         asyncPool.submit(task);
     }
+
+    // --- Internal Helpers ---
 
     private void copyDefaultQuests(File questDir) throws Exception {
         File jarFile;
@@ -201,9 +197,10 @@ public final class QuestEnginePlugin extends JavaPlugin {
                 if (!name.startsWith("quests/") || !name.endsWith(".yml")) continue;
 
                 String fileName = name.substring("quests/".length());
-                File outFile = new File(questDir, fileName);
+                if (fileName.isEmpty()) continue; // 폴더 자체인 경우 스킵
 
-                if (outFile.exists()) continue;
+                File outFile = new File(questDir, fileName);
+                if (outFile.exists()) continue; // 이미 존재하면 덮어쓰지 않음
 
                 try (InputStream in = jar.getInputStream(entry);
                      FileOutputStream out = new FileOutputStream(outFile)) {

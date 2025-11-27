@@ -4,176 +4,199 @@ import io.lumine.mythic.bukkit.events.MythicMobDeathEvent;
 import io.lumine.mythic.bukkit.events.MythicMobSpawnEvent;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Entity;
+import org.bukkit.entity.HumanEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.Event;
 import org.bukkit.event.block.BlockBreakEvent;
-import org.bukkit.event.block.BlockEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
-import org.bukkit.event.entity.*;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.entity.EntityDeathEvent;
+import org.bukkit.event.entity.EntityEvent;
 import org.bukkit.event.inventory.CraftItemEvent;
 import org.bukkit.event.player.PlayerDropItemEvent;
+import org.bukkit.event.player.PlayerEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
-
 import org.bukkit.inventory.ItemStack;
 
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
 import java.lang.reflect.Method;
-import java.util.*;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * EventContextMapper (Fix 2)
+ * - returnNull 메소드를 public으로 변경하여 IllegalAccessError 원천 차단
+ */
 public final class EventContextMapper {
 
     private EventContextMapper() {}
 
-    private static final Map<Class<?>, Method[]> METHOD_CACHE = new ConcurrentHashMap<>(128);
-    private static final Map<Class<?>, Method> PLAYER_METHOD_CACHE = new ConcurrentHashMap<>(64);
+    private static final Map<Class<?>, MethodHandle> PLAYER_GETTER_CACHE = new ConcurrentHashMap<>();
 
-    private static final ThreadLocal<Map<String, Object>> LOCAL_MAP =
-            ThreadLocal.withInitial(() -> new HashMap<>(48));
+    private static final MethodHandles.Lookup LOOKUP = MethodHandles.lookup();
+    private static final MethodHandle NULL_HANDLE;
 
+    // MythicMobs 플러그인 존재 여부 캐싱
+    private static final boolean HAS_MYTHIC;
+
+    static {
+        try {
+            // returnNull이 이제 public이므로 접근 권한 문제 해결
+            NULL_HANDLE = LOOKUP.findStatic(EventContextMapper.class, "returnNull", java.lang.invoke.MethodType.methodType(Player.class, Event.class));
+            HAS_MYTHIC = Bukkit.getPluginManager().getPlugin("MythicMobs") != null;
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public static Player returnNull(Event e) { return null; }
+
+    /**
+     * 이벤트에서 핵심 컨텍스트만 추출 (최소화)
+     */
     public static Map<String, Object> map(Event e) {
         if (e == null) return Collections.emptyMap();
 
-        Map<String, Object> ctx = LOCAL_MAP.get();
-        ctx.clear();
+        Map<String, Object> ctx = new HashMap<>(8);
 
-        Method[] methods = METHOD_CACHE.computeIfAbsent(e.getClass(), EventContextMapper::scanGetters);
-        for (Method m : methods) {
-            try {
-                Object val = m.invoke(e);
-                if (val == null) continue;
-                String key = "event_" + m.getName().substring(3).toLowerCase(Locale.ROOT);
-                ctx.put(key, val);
-            } catch (Throwable ignored) {}
+        Player player = extractPlayer(e);
+        if (player != null) {
+            ctx.put("player_name", player.getName());
+            ctx.put("world_name", player.getWorld().getName());
+        } else {
+            ctx.put("player_name", "unknown");
+            ctx.put("world_name", "unknown");
         }
 
-        injectShortcuts(e, ctx);
-        return new HashMap<>(ctx);
+        populateShortcuts(e, ctx, player);
+
+        return ctx;
     }
 
+    /**
+     * MethodHandle을 사용한 고성능 Player 추출
+     */
     public static Player extractPlayer(Event e) {
         if (e == null) return null;
-        Method m = PLAYER_METHOD_CACHE.computeIfAbsent(e.getClass(), EventContextMapper::findPlayerGetter);
-        if (m == null) return null;
-        try {
-            Object v = m.invoke(e);
-            return v instanceof Player ? (Player) v : null;
-        } catch (Throwable ignored) {}
-        return null;
-    }
+        Class<?> clz = e.getClass();
 
-    private static Method[] scanGetters(Class<?> clz) {
-        List<Method> list = new ArrayList<>(16);
-        for (Method m : clz.getDeclaredMethods()) {
-            if (!m.getName().startsWith("get")) continue;
-            if (m.getParameterCount() != 0) continue;
-            Class<?> rt = m.getReturnType();
-            if (rt == Void.TYPE || rt == Method.class || rt == Class.class) continue;
+        if (e instanceof PlayerEvent pe) {
+            return pe.getPlayer();
+        }
+
+        MethodHandle mh = PLAYER_GETTER_CACHE.get(clz);
+        if (mh != null) {
             try {
-                m.setAccessible(true);
-                list.add(m);
-            } catch (Throwable ignored) {}
-        }
-        return list.toArray(new Method[0]);
-    }
-
-    private static Method findPlayerGetter(Class<?> clz) {
-        for (Method m : clz.getMethods()) {
-            if (m.getParameterCount() != 0) continue;
-            String n = m.getName();
-            if (n.equalsIgnoreCase("getPlayer")
-                    || n.equalsIgnoreCase("getWhoClicked")
-                    || n.equalsIgnoreCase("getEntity")) {
-                return m;
+                return (Player) mh.invoke(e);
+            } catch (Throwable ignored) {
+                return null;
             }
         }
-        return null;
+
+        return findAndCachePlayerGetter(clz, e);
     }
 
-    private static void injectShortcuts(Event e, Map<String, Object> ctx) {
+    private static Player findAndCachePlayerGetter(Class<?> clz, Event e) {
+        MethodHandle target = NULL_HANDLE;
         try {
-            Player player = extractPlayer(e);
-            if (player != null) {
-                ctx.put("player_name", player.getName());
-                if (player.getWorld() != null)
-                    ctx.put("world_name", player.getWorld().getName());
-            } else {
-                ctx.putIfAbsent("player_name", "unknown");
-            }
-
-            if (e instanceof BlockBreakEvent be) {
-                if (be.getBlock() != null)
-                    ctx.put("block_type", be.getBlock().getType().name());
-            } else if (e instanceof BlockPlaceEvent bp) {
-                if (bp.getBlockPlaced() != null)
-                    ctx.put("block_type", bp.getBlockPlaced().getType().name());
-            } else if (e instanceof BlockEvent be2) {
-                if (be2.getBlock() != null && !ctx.containsKey("block_type"))
-                    ctx.put("block_type", be2.getBlock().getType().name());
-            }
-
-            if (e instanceof EntityEvent ee) {
-                Entity ent = ee.getEntity();
-                if (ent != null) {
-                    ctx.put("entity_type", ent.getType().name());
-                    if (ent.getWorld() != null)
-                        ctx.put("world_name", ent.getWorld().getName());
+            // 우선순위 1: getPlayer()
+            try {
+                Method m = clz.getMethod("getPlayer");
+                if (Player.class.isAssignableFrom(m.getReturnType())) {
+                    target = LOOKUP.unreflect(m);
                 }
+            } catch (NoSuchMethodException ignored) {}
+
+            // 우선순위 2: getWhoClicked()
+            if (target == NULL_HANDLE) {
+                try {
+                    Method m = clz.getMethod("getWhoClicked");
+                    if (HumanEntity.class.isAssignableFrom(m.getReturnType())) {
+                        target = LOOKUP.unreflect(m);
+                    }
+                } catch (NoSuchMethodException ignored) {}
             }
 
-            if (e instanceof EntityDeathEvent de) {
-                if (de.getEntity() != null)
-                    ctx.put("entity_type", de.getEntity().getType().name());
-                if (de.getEntity().getKiller() != null)
-                    ctx.put("killer_name", de.getEntity().getKiller().getName());
+            // 우선순위 3: getEntity()가 Player인 경우
+            if (target == NULL_HANDLE) {
+                try {
+                    Method m = clz.getMethod("getEntity");
+                    if (Player.class.isAssignableFrom(m.getReturnType())) {
+                        target = LOOKUP.unreflect(m);
+                    }
+                } catch (NoSuchMethodException ignored) {}
             }
+        } catch (Throwable t) {
+            t.printStackTrace();
+        }
 
-            if (e instanceof EntityDamageByEntityEvent hit) {
-                Entity damager = hit.getDamager();
-                if (damager != null)
-                    ctx.put("damager_type", damager.getType().name());
-                Entity victim = hit.getEntity();
-                if (victim != null)
-                    ctx.put("victim_type", victim.getType().name());
+        PLAYER_GETTER_CACHE.put(clz, target);
+        try {
+            return (Player) target.invoke(e);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private static void populateShortcuts(Event e, Map<String, Object> ctx, Player p) {
+        if (e instanceof BlockBreakEvent be) {
+            ctx.put("block_type", be.getBlock().getType().name());
+        } else if (e instanceof BlockPlaceEvent bp) {
+            ctx.put("block_type", bp.getBlockPlaced().getType().name());
+        }
+
+        if (e instanceof EntityEvent ee) {
+            Entity ent = ee.getEntity();
+            ctx.put("entity_type", ent.getType().name());
+            if (ent instanceof Player && p == null) {
+                ctx.put("player_name", ent.getName());
             }
+        }
 
-            ItemStack item = null;
-
-            if (e instanceof PlayerInteractEvent ie) {
-                item = ie.getItem();
-                if (item == null && player != null)
-                    item = player.getInventory().getItemInMainHand();
-            } else if (e instanceof PlayerDropItemEvent dropE) {
-                if (dropE.getItemDrop() != null)
-                    item = dropE.getItemDrop().getItemStack();
-            } else if (e instanceof CraftItemEvent craftE) {
-                if (craftE.getRecipe() != null)
-                    item = craftE.getRecipe().getResult();
+        if (e instanceof EntityDeathEvent de) {
+            if (de.getEntity().getKiller() != null) {
+                ctx.put("killer_name", de.getEntity().getKiller().getName());
             }
+        }
 
-            if (item != null && item.getType() != null) {
-                ctx.put("item_type", item.getType().name());
-                if (item.hasItemMeta() && item.getItemMeta().hasDisplayName())
-                    ctx.put("item_name", item.getItemMeta().getDisplayName());
-            } else {
-                ctx.putIfAbsent("item_type", "AIR");
+        if (e instanceof EntityDamageByEntityEvent hit) {
+            Entity damager = hit.getDamager();
+            ctx.put("damager_type", damager.getType().name());
+            if (damager instanceof Player dp) ctx.put("damager_name", dp.getName());
+
+            Entity victim = hit.getEntity();
+            ctx.put("victim_type", victim.getType().name());
+            if (victim instanceof Player vp) ctx.put("victim_name", vp.getName());
+        }
+
+        ItemStack item = null;
+        if (e instanceof PlayerInteractEvent ie) {
+            item = ie.getItem();
+            if (item == null && p != null) item = p.getInventory().getItemInMainHand();
+        } else if (e instanceof PlayerDropItemEvent de) {
+            item = de.getItemDrop().getItemStack();
+        } else if (e instanceof CraftItemEvent ce) {
+            item = ce.getRecipe().getResult();
+        }
+
+        if (item != null && item.getType() != org.bukkit.Material.AIR) {
+            ctx.put("item_type", item.getType().name());
+            if (item.hasItemMeta() && item.getItemMeta().hasDisplayName()) {
+                ctx.put("item_name", item.getItemMeta().getDisplayName());
             }
+        } else {
+            ctx.put("item_type", "AIR");
+        }
 
-            if (e instanceof MythicMobDeathEvent mm) {
-                if (mm.getMobType() != null)
-                    ctx.put("mythicmob_type", mm.getMobType().getInternalName());
+        if (HAS_MYTHIC) {
+            if (e instanceof MythicMobDeathEvent md) {
+                if (md.getMobType() != null) ctx.put("mythicmob_type", md.getMobType().getInternalName());
             } else if (e instanceof MythicMobSpawnEvent ms) {
-                if (ms.getMobType() != null)
-                    ctx.put("mythicmob_type", ms.getMobType().getInternalName());
+                if (ms.getMobType() != null) ctx.put("mythicmob_type", ms.getMobType().getInternalName());
             }
-
-            ctx.putIfAbsent("world_name", "unknown_world");
-            ctx.putIfAbsent("entity_type", "UNKNOWN");
-            ctx.putIfAbsent("block_type", "AIR");
-            ctx.putIfAbsent("item_name", "");
-            ctx.putIfAbsent("item_type", "AIR");
-
-        } catch (Throwable ex) {
-            Bukkit.getLogger().warning("[QuestEngine] ContextMapper failed for " + e.getEventName() + ": " + ex.getMessage());
         }
     }
 }

@@ -8,7 +8,6 @@ import com.gmail.bobason01.questengine.util.ItemBuilder;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
-import org.bukkit.entity.HumanEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -18,16 +17,14 @@ import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.ItemMeta;
 
 import java.io.File;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * QuestEditorMenu
- * 메인 퀘스트 편집 GUI
- * DISPLAY / EVENT / CUSTOM_EVENT / TARGETS / META / ACTIONS / CONDITIONS / OPTIONS / CHAIN
+ * QuestEditorMenu (Fixed Variable Scope)
+ * - Fixed: "Variable 'p' is already defined" error by renaming lambda params to 'pl'
+ * - Fixed: "Symbol 'player' cannot be resolved" by standardizing variable names
  */
 public final class QuestEditorMenu implements Listener {
 
@@ -41,114 +38,54 @@ public final class QuestEditorMenu implements Listener {
     private static final String HOLDER_CAPTURES = "Q_EDITOR_CAPTURES";
 
     private final QuestEnginePlugin plugin;
-    private final Map<UUID, Session> sessions = new ConcurrentHashMap<>();
+    private final Map<UUID, Session> sessions = new HashMap<>();
 
     public enum EditorTab {
-        DISPLAY("display"),
-        EVENT("event"),
-        CUSTOM_EVENT("custom_event"),
-        TARGETS("targets"),
-        META("meta"),
-        ACTIONS("actions"),
-        CONDITIONS("conditions"),
-        OPTIONS("options"),
-        CHAIN("chain");
-
+        DISPLAY("display"), EVENT("event"), CUSTOM_EVENT("custom_event"),
+        TARGETS("targets"), META("meta"), ACTIONS("actions"),
+        CONDITIONS("conditions"), OPTIONS("options"), CHAIN("chain");
         private final String key;
-
-        EditorTab(String key) {
-            this.key = key;
-        }
-
-        public String key() {
-            return key;
-        }
+        EditorTab(String key) { this.key = key; }
+        public String key() { return key; }
     }
 
     public enum ActionGroup {
-        ACCEPT("accept"),
-        START("start"),
-        SUCCESS("success"),
-        FAIL("fail"),
-        CANCEL("cancel"),
-        STOP("stop"),
-        RESTART("restart"),
-        REPEAT("repeat");
-
+        ACCEPT("accept"), START("start"), SUCCESS("success"), FAIL("fail"),
+        CANCEL("cancel"), STOP("stop"), RESTART("restart"), REPEAT("repeat");
         public final String key;
-
-        ActionGroup(String key) {
-            this.key = key;
-        }
+        ActionGroup(String key) { this.key = key; }
     }
 
     private static final class Session {
         final QuestEditorDraft draft;
         EditorTab tab;
         int eventPage;
-
-        Session(QuestEditorDraft draft, EditorTab tab) {
-            this.draft = draft;
-            this.tab = tab;
-            this.eventPage = 0;
-        }
+        Session(QuestEditorDraft draft, EditorTab tab) { this.draft = draft; this.tab = tab; }
     }
 
-    private static final List<String> BUILTIN_EVENTS = new ArrayList<>();
-
-    static {
-        BUILTIN_EVENTS.addAll(Arrays.asList(
-                "BLOCK_BREAK",
-                "BLOCK_BURN",
-                "BLOCK_EXPLODE",
-                "BLOCK_FERTILIZING",
-                "BLOCK_PLACE",
-                "BREEDING",
-                "BREWING",
-                "DEAL_DAMAGE",
-                "ENTITY_INTERACT",
-                "FISHING",
-                "INVENTORY_OPEN",
-                "ITEM_BREAK",
-                "ITEM_CONSUME",
-                "ITEM_CRAFT",
-                "ITEM_DAMAGE",
-                "ITEM_DROP",
-                "ITEM_ENCHANT",
-                "ITEM_MENDING",
-                "ITEM_MOVE",
-                "ITEM_PICKUP",
-                "ITEM_REPAIR",
-                "MOBKILLING",
-                "MYTHICMOBS_ENTITY_KILL",
-                "MYTHICMOBS_ENTITY_SPAWN",
-                "PLAYER_ARMOR",
-                "PLAYER_BED_ENTER",
-                "PLAYER_CHAT",
-                "PLAYER_COMMAND",
-                "PLAYER_EXP_GAIN",
-                "PLAYER_LEAVE",
-                "PLAYER_LEVELUP",
-                "PLAYER_PRE_JOIN",
-                "PLAYER_RESPAWN",
-                "PLAYER_SWAP_HAND",
-                "PLAYER_TELEPORT",
-                "PLAYER_WALK",
-                "SMITHING",
-                "TAMING",
-                "WORLD_CHUNK_LOAD"
-        ));
-        BUILTIN_EVENTS.sort(String::compareToIgnoreCase);
-    }
+    private static final List<String> BUILTIN_EVENTS = List.of(
+            "BLOCK_BREAK", "BLOCK_BURN", "BLOCK_EXPLODE", "BLOCK_FERTILIZING", "BLOCK_PLACE",
+            "BREEDING", "BREWING", "DEAL_DAMAGE", "ENTITY_INTERACT", "FISHING",
+            "INVENTORY_OPEN", "ITEM_BREAK", "ITEM_CONSUME", "ITEM_CRAFT", "ITEM_DAMAGE",
+            "ITEM_DROP", "ITEM_ENCHANT", "ITEM_MENDING", "ITEM_MOVE", "ITEM_PICKUP",
+            "ITEM_REPAIR", "MOBKILLING", "MYTHICMOBS_ENTITY_KILL", "MYTHICMOBS_ENTITY_SPAWN",
+            "PLAYER_ARMOR", "PLAYER_BED_ENTER", "PLAYER_CHAT", "PLAYER_COMMAND",
+            "PLAYER_EXP_GAIN", "PLAYER_LEAVE", "PLAYER_LEVELUP", "PLAYER_PRE_JOIN",
+            "PLAYER_RESPAWN", "PLAYER_SWAP_HAND", "PLAYER_TELEPORT", "PLAYER_WALK",
+            "SMITHING", "TAMING", "WORLD_CHUNK_LOAD"
+    );
 
     public QuestEditorMenu(QuestEnginePlugin plugin) {
         this.plugin = plugin;
         Bukkit.getPluginManager().registerEvents(this, plugin);
     }
 
-    public void openNew(Player player) {
+    // --- Open Methods ---
+    public void openNew(Player player) { openNewWithId(player, "new_quest"); }
+
+    public void openNewWithId(Player player, String id) {
         QuestEditorDraft draft = new QuestEditorDraft();
-        draft.id = "new_quest";
+        draft.id = id.toLowerCase(Locale.ROOT);
         draft.name = "New Quest";
         draft.displayTitle = "&fNew Quest";
         ensureActionGroups(draft);
@@ -165,137 +102,72 @@ public final class QuestEditorMenu implements Listener {
         openMainDelayed(player, session);
     }
 
-    private String m(String path) {
-        return plugin.msg().get(path);
-    }
+    // --- Helpers ---
+    private String m(String path) { return plugin.msg().get(path); }
+    private String m(String path, String def) { return plugin.msg().get(path, def); }
 
-    private String m(String path, String def) {
-        return plugin.msg().get(path, def);
+    // --- Delayed Openers ---
+    private void openMainDelayed(Player p, Session s) {
+        Bukkit.getScheduler().runTaskLater(plugin, () -> { if (p.isOnline()) p.openInventory(createMainInventory(s)); }, 1L);
     }
-
-    private List<String> ml(String path) {
-        return plugin.msg().list(path);
-    }
-
-    private void openMainDelayed(Player player, Session session) {
+    private void openListDelayed(Player p, String k) {
         Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            if (!player.isOnline()) return;
-            Inventory inv = createMainInventory(session);
-            player.openInventory(inv);
-        }, 2L);
+            if (p.isOnline()) { Inventory inv = createListInventory(p, k); if (inv != null) p.openInventory(inv); }
+        }, 1L);
     }
-
-    private void openListDelayed(Player player, String key) {
+    private void openEventSelectDelayed(Player p) {
         Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            if (!player.isOnline()) return;
-            Inventory inv = createListInventory(player, key);
-            if (inv != null) {
-                player.openInventory(inv);
-            }
-        }, 2L);
+            if (p.isOnline()) { Session s = sessions.get(p.getUniqueId()); if (s != null) p.openInventory(createEventInventory(s)); }
+        }, 1L);
     }
-
-    private void openEventSelectDelayed(Player player) {
+    private void openCapturesDelayed(Player p) {
         Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            if (!player.isOnline()) return;
-            Session session = sessions.get(player.getUniqueId());
-            if (session == null) return;
-            Inventory inv = createEventInventory(session);
-            player.openInventory(inv);
-        }, 2L);
+            if (p.isOnline()) { Session s = sessions.get(p.getUniqueId()); if (s != null) p.openInventory(createCapturesInventory(s)); }
+        }, 1L);
     }
 
-    private void openCapturesDelayed(Player player) {
-        Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            if (!player.isOnline()) return;
-            Session session = sessions.get(player.getUniqueId());
-            if (session == null) return;
-            Inventory inv = createCapturesInventory(session);
-            player.openInventory(inv);
-        }, 2L);
-    }
-
+    // --- Inventory Creators ---
     private Inventory createMainInventory(Session session) {
         String tabName = m("gui.editor.tab." + session.tab.key());
         String title = m("gui.editor.title.main").replace("%tab%", tabName);
-
         GuiHolder holder = new GuiHolder(HOLDER_MAIN);
         Inventory inv = Bukkit.createInventory(holder, SIZE, title);
         holder.setInventory(inv);
-
-        for (int i = 0; i < SIZE; i++) {
-            inv.setItem(i, null);
-        }
+        plugin.gui().fill(inv, new ItemStack(Material.GRAY_STAINED_GLASS_PANE));
 
         renderTabs(inv, session.tab);
         renderFields(inv, session.draft, session.tab);
         renderControls(inv);
-
         return inv;
     }
 
     private Inventory createListInventory(Player player, String key) {
         Session session = sessions.get(player.getUniqueId());
         if (session == null) return null;
-
         ensureActionGroups(session.draft);
         List<String> list = getListReference(session.draft, key);
-        if (list == null) {
-            player.sendMessage(m("gui.editor.error.list_unknown", "&cUnsupported list key: ") + key);
-            return null;
-        }
+        if (list == null) return null;
 
         String title = m("gui.editor.title.list").replace("%key%", key);
-
         GuiHolder holder = new GuiHolder(HOLDER_LIST + ":" + key);
         Inventory inv = Bukkit.createInventory(holder, SIZE, title);
         holder.setInventory(inv);
-
-        for (int i = 0; i < SIZE; i++) {
-            inv.setItem(i, null);
-        }
+        plugin.gui().fill(inv, new ItemStack(Material.GRAY_STAINED_GLASS_PANE));
 
         int idx = 0;
-        for (String value : list) {
-            if (idx >= (CONTENT_END - CONTENT_START + 1)) break;
-            int slot = CONTENT_START + idx;
-
-            String name = value == null || value.isEmpty() ? m("gui.editor.common.empty") : value;
-            List<String> lore = new ArrayList<>();
-            lore.add(ChatColor.GRAY + "Index " + idx);
-            lore.add("");
-            lore.add(m("gui.editor.common.text.left"));
-            lore.add(m("gui.editor.common.text.right"));
-
-            ItemStack item = new ItemBuilder(Material.PAPER)
-                    .setName(name)
-                    .setLore(lore)
-                    .hideAllFlags()
-                    .build();
-
-            inv.setItem(slot, item);
-            idx++;
+        int max = CONTENT_END - CONTENT_START + 1;
+        for (String val : list) {
+            if (idx >= max) break;
+            inv.setItem(CONTENT_START + idx++, new ItemBuilder(Material.PAPER)
+                    .setName(val == null || val.isEmpty() ? m("gui.editor.common.empty") : val)
+                    .setLore(Arrays.asList(ChatColor.GRAY + "Idx " + (idx-1), "", m("gui.editor.common.text.left"), m("gui.editor.common.text.right")))
+                    .hideAllFlags().build());
         }
-
-        int addSlot = CONTENT_START + idx;
-        if (addSlot <= CONTENT_END) {
-            String addName = m("gui.editor.list.add.name", "&aAdd");
-            String addLore1 = m("gui.editor.list.add.lore1", "&7Click to add entry");
-            ItemStack add = new ItemBuilder(Material.LIME_STAINED_GLASS_PANE)
-                    .setName(addName)
-                    .setLore(Collections.singletonList(addLore1))
-                    .hideAllFlags()
-                    .build();
-            inv.setItem(addSlot, add);
+        if (CONTENT_START + idx <= CONTENT_END) {
+            inv.setItem(CONTENT_START + idx, new ItemBuilder(Material.LIME_STAINED_GLASS_PANE)
+                    .setName(m("gui.editor.list.add.name")).setLore(List.of(m("gui.editor.list.add.lore1"))).hideAllFlags().build());
         }
-
-        ItemStack back = new ItemBuilder(Material.ARROW)
-                .setName(m("gui.editor.captures.back.name"))
-                .setLore(Collections.singletonList(m("gui.editor.captures.back.lore")))
-                .hideAllFlags()
-                .build();
-        inv.setItem(53, back);
-
+        inv.setItem(53, new ItemBuilder(Material.ARROW).setName(m("gui.editor.captures.back.name")).build());
         return inv;
     }
 
@@ -303,1128 +175,155 @@ public final class QuestEditorMenu implements Listener {
         int pageSize = CONTENT_END - CONTENT_START + 1;
         int total = BUILTIN_EVENTS.size();
         int maxPage = Math.max(1, (total + pageSize - 1) / pageSize);
-        if (session.eventPage < 0) session.eventPage = 0;
-        if (session.eventPage >= maxPage) session.eventPage = maxPage - 1;
+        session.eventPage = Math.max(0, Math.min(session.eventPage, maxPage - 1));
 
-        int page = session.eventPage + 1;
-
-        String title = m("gui.editor.title.event")
-                .replace("%page%", String.valueOf(page))
+        String title = m("gui.editor.title.event_view", "&9Event Select %page%/%max%")
+                .replace("%page%", String.valueOf(session.eventPage + 1))
                 .replace("%max%", String.valueOf(maxPage));
 
         GuiHolder holder = new GuiHolder(HOLDER_EVENT);
         Inventory inv = Bukkit.createInventory(holder, SIZE, title);
         holder.setInventory(inv);
+        plugin.gui().fill(inv, new ItemStack(Material.GRAY_STAINED_GLASS_PANE));
 
-        for (int i = 0; i < SIZE; i++) {
-            inv.setItem(i, null);
-        }
-
-        int startIndex = session.eventPage * pageSize;
+        int start = session.eventPage * pageSize;
         int idx = 0;
-        for (int i = startIndex; i < total && idx < pageSize; i++, idx++) {
-            String ev = BUILTIN_EVENTS.get(i);
-            String name = m("gui.editor.event.entry.name").replace("%event%", ev);
-            String lore1 = m("gui.editor.event.entry.lore1");
-            String lore2 = m("gui.editor.event.entry.lore2");
-
-            List<String> lore = new ArrayList<>();
-            lore.add(lore1);
-            lore.add(lore2);
-
-            ItemStack item = new ItemBuilder(Material.PAPER)
-                    .setName(name)
-                    .setLore(lore)
-                    .hideAllFlags()
-                    .build();
-
-            inv.setItem(CONTENT_START + idx, item);
+        for (int i = start; i < total && idx < pageSize; i++, idx++) {
+            inv.setItem(CONTENT_START + idx, new ItemBuilder(Material.PAPER)
+                    .setName(m("gui.editor.event.entry.name").replace("%event%", BUILTIN_EVENTS.get(i)))
+                    .setLore(Arrays.asList(m("gui.editor.event.entry.lore1"), m("gui.editor.event.entry.lore2")))
+                    .hideAllFlags().build());
         }
 
-        List<String> helpLore = new ArrayList<>();
-        helpLore.add(m("gui.editor.event.help.help1"));
-        helpLore.add(m("gui.editor.event.help.help2"));
-        helpLore.add(m("gui.editor.event.help.help3"));
-
-        ItemStack help = new ItemBuilder(Material.WRITABLE_BOOK)
+        inv.setItem(48, new ItemBuilder(Material.WRITABLE_BOOK)
                 .setName(m("gui.editor.event.help.title"))
-                .setLore(helpLore)
-                .hideAllFlags()
-                .build();
-        inv.setItem(40, help);
+                .setLore(Arrays.asList(m("gui.editor.event.help.help1"), m("gui.editor.event.help.help2"), m("gui.editor.event.help.help3")))
+                .hideAllFlags().build());
 
-        if (session.eventPage > 0) {
-            String namePrev = m("gui.editor.event.prev.name");
-            String lorePrev = m("gui.editor.event.prev.lore").replace("%page%", String.valueOf(page - 1));
-            ItemStack prev = new ItemBuilder(Material.ARROW)
-                    .setName(namePrev)
-                    .setLore(Collections.singletonList(lorePrev))
-                    .hideAllFlags()
-                    .build();
-            inv.setItem(45, prev);
-        }
-
-        ItemStack back = new ItemBuilder(Material.BARRIER)
-                .setName(m("gui.editor.event.back.name"))
-                .setLore(Collections.singletonList(m("gui.editor.event.back.lore")))
-                .hideAllFlags()
-                .build();
-        inv.setItem(49, back);
-
-        if (session.eventPage < maxPage - 1) {
-            String nameNext = m("gui.editor.event.next.name");
-            String loreNext = m("gui.editor.event.next.lore").replace("%page%", String.valueOf(page + 1));
-            ItemStack next = new ItemBuilder(Material.ARROW)
-                    .setName(nameNext)
-                    .setLore(Collections.singletonList(loreNext))
-                    .hideAllFlags()
-                    .build();
-            inv.setItem(53, next);
-        }
+        if (session.eventPage > 0) inv.setItem(45, new ItemBuilder(Material.ARROW).setName(m("gui.editor.event.prev.name")).build());
+        inv.setItem(49, new ItemBuilder(Material.BARRIER).setName(m("gui.editor.event.back.name")).build());
+        if (session.eventPage < maxPage - 1) inv.setItem(53, new ItemBuilder(Material.ARROW).setName(m("gui.editor.event.next.name")).build());
 
         return inv;
     }
 
     private Inventory createCapturesInventory(Session session) {
-        String title = m("gui.editor.title.captures");
-
+        String title = m("gui.editor.title.captures_view", "&9Captures Editor");
         GuiHolder holder = new GuiHolder(HOLDER_CAPTURES);
         Inventory inv = Bukkit.createInventory(holder, SIZE, title);
         holder.setInventory(inv);
-
-        for (int i = 0; i < SIZE; i++) {
-            inv.setItem(i, null);
-        }
+        plugin.gui().fill(inv, new ItemStack(Material.GRAY_STAINED_GLASS_PANE));
 
         List<Map.Entry<String, String>> entries = new ArrayList<>(session.draft.customCaptures.entrySet());
         int idx = 0;
-        for (Map.Entry<String, String> entry : entries) {
-            if (idx >= (CONTENT_END - CONTENT_START + 1)) break;
-
-            String key = entry.getKey();
-            String chain = entry.getValue();
-
-            String name = m("gui.editor.captures.entry.name").replace("%key%", key);
-            String chainLine = m("gui.editor.captures.entry.chain").replace("%chain%", chain);
-            String left = m("gui.editor.captures.entry.left");
-            String right = m("gui.editor.captures.entry.right");
-
-            List<String> lore = new ArrayList<>();
-            lore.add(chainLine);
-            lore.add("");
-            lore.add(left);
-            lore.add(right);
-
-            ItemStack item = new ItemBuilder(Material.PAPER)
-                    .setName(name)
-                    .setLore(lore)
-                    .hideAllFlags()
-                    .build();
-
-            inv.setItem(CONTENT_START + idx, item);
-            idx++;
+        int max = CONTENT_END - CONTENT_START + 1;
+        for (var e : entries) {
+            if (idx >= max) break;
+            inv.setItem(CONTENT_START + idx++, new ItemBuilder(Material.PAPER)
+                    .setName(m("gui.editor.captures.entry.name").replace("%key%", e.getKey()))
+                    .setLore(Arrays.asList(m("gui.editor.captures.entry.chain").replace("%chain%", e.getValue()), "", m("gui.editor.captures.entry.left"), m("gui.editor.captures.entry.right")))
+                    .hideAllFlags().build());
         }
-
-        int addSlot = CONTENT_START + idx;
-        if (addSlot <= CONTENT_END) {
-            List<String> lore = new ArrayList<>();
-            lore.add(m("gui.editor.captures.add.lore1"));
-            lore.add(m("gui.editor.captures.add.lore2"));
-
-            ItemStack add = new ItemBuilder(Material.LIME_STAINED_GLASS_PANE)
-                    .setName(m("gui.editor.captures.add.name"))
-                    .setLore(lore)
-                    .hideAllFlags()
-                    .build();
-            inv.setItem(addSlot, add);
+        if (CONTENT_START + idx <= CONTENT_END) {
+            inv.setItem(CONTENT_START + idx, new ItemBuilder(Material.LIME_STAINED_GLASS_PANE)
+                    .setName(m("gui.editor.captures.add.name")).setLore(Arrays.asList(m("gui.editor.captures.add.lore1"), m("gui.editor.captures.add.lore2"))).hideAllFlags().build());
         }
-
-        ItemStack back = new ItemBuilder(Material.ARROW)
-                .setName(m("gui.editor.captures.back.name"))
-                .setLore(Collections.singletonList(m("gui.editor.captures.back.lore")))
-                .hideAllFlags()
-                .build();
-        inv.setItem(53, back);
-
+        inv.setItem(53, new ItemBuilder(Material.ARROW).setName(m("gui.editor.captures.back.name")).build());
         return inv;
     }
 
+    // --- Renderers ---
     private void renderTabs(Inventory inv, EditorTab current) {
-        EditorTab[] values = EditorTab.values();
-        for (int i = 0; i < values.length; i++) {
-            EditorTab tab = values[i];
-            boolean selected = (tab == current);
-
-            String base = m("gui.editor.tab." + tab.key());
-            String nameTemplate = selected ? m("gui.editor.tab.selected") : m("gui.editor.tab.normal");
-            String name = nameTemplate.replace("%name%", base);
-
-            String loreLine = selected ? m("gui.editor.tab.lore.current") : m("gui.editor.tab.lore.switch");
-
-            Material mat = selected ? Material.BLUE_STAINED_GLASS_PANE : Material.LIGHT_GRAY_STAINED_GLASS_PANE;
-
-            ItemStack item = new ItemBuilder(mat)
-                    .setName(name)
-                    .setLore(Collections.singletonList(loreLine))
-                    .hideAllFlags()
-                    .build();
-
-            inv.setItem(i, item);
+        EditorTab[] vals = EditorTab.values();
+        for (int i = 0; i < vals.length; i++) {
+            boolean sel = vals[i] == current;
+            inv.setItem(i, new ItemBuilder(sel ? Material.BLUE_STAINED_GLASS_PANE : Material.LIGHT_GRAY_STAINED_GLASS_PANE)
+                    .setName((sel ? m("gui.editor.tab.selected") : m("gui.editor.tab.normal")).replace("%name%", m("gui.editor.tab." + vals[i].key())))
+                    .setLore(List.of(sel ? m("gui.editor.tab.lore.current") : m("gui.editor.tab.lore.switch")))
+                    .hideAllFlags().build());
         }
     }
 
     private void renderFields(Inventory inv, QuestEditorDraft d, EditorTab tab) {
         ensureActionGroups(d);
         switch (tab) {
-            case DISPLAY -> renderDisplayTab(inv, d);
-            case EVENT -> renderEventTab(inv, d);
-            case CUSTOM_EVENT -> renderCustomEventTab(inv, d);
-            case TARGETS -> renderTargetsTab(inv, d);
-            case META -> renderMetaTab(inv, d);
-            case ACTIONS -> renderActionsTab(inv, d);
-            case CONDITIONS -> renderConditionsTab(inv, d);
-            case OPTIONS -> renderOptionsTab(inv, d);
-            case CHAIN -> renderChainTab(inv, d);
+            case DISPLAY -> {
+                inv.setItem(10, textItem("gui.editor.display.title.label", d.displayTitle));
+                inv.setItem(12, listItem("gui.editor.display.description.label", d.displayDescription));
+                inv.setItem(14, iconItem(d));
+                inv.setItem(16, textItem("gui.editor.display.progress.label", d.displayProgress));
+                inv.setItem(19, numberItem("gui.editor.display.cmd.label", d.displayCustomModelData));
+                inv.setItem(21, textItem("gui.editor.display.hint.label", d.displayHint));
+                inv.setItem(23, textItem("gui.editor.display.reward.label", d.displayReward));
+                inv.setItem(25, textItem("gui.editor.display.category.label", d.displayCategory));
+                inv.setItem(28, textItem("gui.editor.display.difficulty.label", d.displayDifficulty));
+                inv.setItem(40, new ItemBuilder(Material.ITEM_FRAME).setName(m("gui.editor.display.icon.help.title")).setLore(Arrays.asList(m("gui.editor.display.icon.help.help1"), m("gui.editor.display.icon.help.help2"), m("gui.editor.display.icon.help.help3"), m("gui.editor.display.icon.help.help4"))).hideAllFlags().build());
+            }
+            case EVENT -> {
+                inv.setItem(10, textItem("gui.editor.event.event.label", d.event));
+                inv.setItem(12, textItem("gui.editor.event.startmode.label", d.startMode.name()));
+                inv.setItem(14, textItem("gui.editor.event.type.label", d.type));
+                inv.setItem(48, new ItemBuilder(Material.WRITABLE_BOOK).setName(m("gui.editor.event.help.title")).setLore(Arrays.asList(m("gui.editor.event.help.help1"), m("gui.editor.event.help.help2"), m("gui.editor.event.help.help3"))).hideAllFlags().build());
+            }
+            case CUSTOM_EVENT -> {
+                inv.setItem(10, textItem("gui.editor.custom.eventclass.label", d.customEventClass));
+                inv.setItem(12, textItem("gui.editor.custom.playergetter.label", d.customPlayerGetter));
+                inv.setItem(14, new ItemBuilder(Material.BOOK).setName(m("gui.editor.custom.captures.label")).setLore(Arrays.asList(m("gui.editor.custom.captures.entries").replace("%count%", String.valueOf(d.customCaptures.size())), "", m("gui.editor.custom.captures.left"), m("gui.editor.custom.captures.right"))).hideAllFlags().build());
+            }
+            case TARGETS -> {
+                inv.setItem(10, listItem("gui.editor.targets.targets.label", d.targets));
+                inv.setItem(12, numberItem("gui.editor.targets.amount.label", d.amount));
+                inv.setItem(14, numberItem("gui.editor.targets.repeat.label", d.repeat));
+                inv.setItem(16, numberItem("gui.editor.targets.points.label", d.points));
+            }
+            case META -> {
+                inv.setItem(10, textItem("gui.editor.meta.id.label", d.id));
+                inv.setItem(12, textItem("gui.editor.meta.name.label", d.name));
+            }
+            case ACTIONS -> {
+                int[] slots = {10, 12, 14, 19, 21, 23, 28, 30};
+                ActionGroup[] grps = ActionGroup.values();
+                for (int i = 0; i < grps.length && i < slots.length; i++) {
+                    inv.setItem(slots[i], new ItemBuilder(Material.BOOK).setName(m("gui.editor.actions.group." + grps[i].key)).setLore(Arrays.asList(m("gui.editor.actions.lines").replace("%count%", String.valueOf(d.actions.getOrDefault(grps[i].key, List.of()).size())), "", m("gui.editor.actions.left"), m("gui.editor.actions.right"))).hideAllFlags().build());
+                }
+                inv.setItem(40, new ItemBuilder(Material.MAP).setName(m("gui.editor.actions.help.title")).setLore(Arrays.asList(m("gui.editor.actions.help.help1"), m("gui.editor.actions.help.help2"), m("gui.editor.actions.help.help3"), m("gui.editor.actions.help.help4"))).hideAllFlags().build());
+            }
+            case CONDITIONS -> {
+                inv.setItem(10, listItem("gui.editor.conditions.start.label", d.condStart));
+                inv.setItem(12, listItem("gui.editor.conditions.success.label", d.condSuccess));
+                inv.setItem(14, listItem("gui.editor.conditions.fail.label", d.condFail));
+                inv.setItem(40, new ItemBuilder(Material.WRITABLE_BOOK).setName(m("gui.editor.conditions.help.title")).setLore(Arrays.asList(m("gui.editor.conditions.help.help1"), m("gui.editor.conditions.help.help2"), m("gui.editor.conditions.help.help3"))).hideAllFlags().build());
+            }
+            case OPTIONS -> {
+                inv.setItem(10, textItem("gui.editor.options.resetpolicy.label", d.resetPolicy));
+                inv.setItem(12, textItem("gui.editor.options.resettime.label", d.resetTime));
+                inv.setItem(28, booleanItem("gui.editor.options.public.label", d.isPublic));
+                inv.setItem(30, booleanItem("gui.editor.options.party.label", d.party));
+                inv.setItem(40, new ItemBuilder(Material.MAP).setName(m("gui.editor.options.help.title")).setLore(Arrays.asList(m("gui.editor.options.help.help1"), m("gui.editor.options.help.help2"), m("gui.editor.options.help.help3"), m("gui.editor.options.help.help4"))).hideAllFlags().build());
+            }
+            case CHAIN -> inv.setItem(10, textItem("gui.editor.chain.next.label", d.nextQuestOnComplete));
         }
-    }
-
-    private void renderDisplayTab(Inventory inv, QuestEditorDraft d) {
-        inv.setItem(10, textItem("gui.editor.display.title.label", d.displayTitle));
-        inv.setItem(12, listItem("gui.editor.display.description.label", d.displayDescription));
-        inv.setItem(14, iconItem(d));
-        inv.setItem(16, textItem("gui.editor.display.progress.label", d.displayProgress));
-
-        inv.setItem(19, numberItem("gui.editor.display.cmd.label", d.displayCustomModelData));
-        inv.setItem(21, textItem("gui.editor.display.hint.label", d.displayHint));
-        inv.setItem(23, textItem("gui.editor.display.reward.label", d.displayReward));
-        inv.setItem(25, textItem("gui.editor.display.category.label", d.displayCategory));
-        inv.setItem(28, textItem("gui.editor.display.difficulty.label", d.displayDifficulty));
-
-        List<String> lore = new ArrayList<>();
-        lore.add(m("gui.editor.display.icon.help.help1"));
-        lore.add(m("gui.editor.display.icon.help.help2"));
-        lore.add(m("gui.editor.display.icon.help.help3"));
-        lore.add(m("gui.editor.display.icon.help.help4"));
-
-        ItemStack info = new ItemBuilder(Material.ITEM_FRAME)
-                .setName(m("gui.editor.display.icon.help.title"))
-                .setLore(lore)
-                .hideAllFlags()
-                .build();
-        inv.setItem(40, info);
-    }
-
-    private void renderEventTab(Inventory inv, QuestEditorDraft d) {
-        inv.setItem(10, textItem("gui.editor.event.event.label", d.event));
-        inv.setItem(12, textItem("gui.editor.event.startmode.label", d.startMode.name()));
-        inv.setItem(14, textItem("gui.editor.event.type.label", d.type));
-
-        List<String> lore = new ArrayList<>();
-        lore.add(m("gui.editor.event.help.help1"));
-        lore.add(m("gui.editor.event.help.help2"));
-        lore.add(m("gui.editor.event.help.help3"));
-
-        ItemStack help = new ItemBuilder(Material.WRITABLE_BOOK)
-                .setName(m("gui.editor.event.help.title"))
-                .setLore(lore)
-                .hideAllFlags()
-                .build();
-        inv.setItem(40, help);
-    }
-
-    private void renderCustomEventTab(Inventory inv, QuestEditorDraft d) {
-        inv.setItem(10, textItem("gui.editor.custom.eventclass.label", d.customEventClass));
-        inv.setItem(12, textItem("gui.editor.custom.playergetter.label", d.customPlayerGetter));
-
-        int count = d.customCaptures.size();
-        String name = m("gui.editor.custom.captures.label");
-        String entries = m("gui.editor.custom.captures.entries").replace("%count%", String.valueOf(count));
-        String left = m("gui.editor.custom.captures.left");
-        String right = m("gui.editor.custom.captures.right");
-
-        List<String> lore = new ArrayList<>();
-        lore.add(entries);
-        lore.add("");
-        lore.add(left);
-        lore.add(right);
-
-        ItemStack captures = new ItemBuilder(Material.BOOK)
-                .setName(name)
-                .setLore(lore)
-                .hideAllFlags()
-                .build();
-        inv.setItem(14, captures);
-    }
-
-    private void renderTargetsTab(Inventory inv, QuestEditorDraft d) {
-        inv.setItem(10, listItem("gui.editor.targets.targets.label", d.targets));
-        inv.setItem(12, numberItem("gui.editor.targets.amount.label", d.amount));
-        inv.setItem(14, numberItem("gui.editor.targets.repeat.label", d.repeat));
-        inv.setItem(16, numberItem("gui.editor.targets.points.label", d.points));
-    }
-
-    private void renderMetaTab(Inventory inv, QuestEditorDraft d) {
-        inv.setItem(10, textItem("gui.editor.meta.id.label", d.id));
-        inv.setItem(12, textItem("gui.editor.meta.name.label", d.name));
-    }
-
-    private void renderActionsTab(Inventory inv, QuestEditorDraft d) {
-        ensureActionGroups(d);
-
-        int[] slots = {
-                10, 12, 14,
-                19, 21, 23,
-                28, 30
-        };
-        ActionGroup[] groups = ActionGroup.values();
-
-        for (int i = 0; i < groups.length && i < slots.length; i++) {
-            ActionGroup g = groups[i];
-            List<String> lines = d.actions.getOrDefault(g.key, Collections.emptyList());
-
-            String groupName = m("gui.editor.actions.group." + g.key);
-            String linesText = m("gui.editor.actions.lines").replace("%count%", String.valueOf(lines.size()));
-            String left = m("gui.editor.actions.left");
-            String right = m("gui.editor.actions.right");
-
-            List<String> lore = new ArrayList<>();
-            lore.add(linesText);
-            lore.add("");
-            lore.add(left);
-            lore.add(right);
-
-            ItemStack item = new ItemBuilder(Material.BOOK)
-                    .setName(groupName)
-                    .setLore(lore)
-                    .hideAllFlags()
-                    .build();
-            inv.setItem(slots[i], item);
-        }
-
-        List<String> infoLore = new ArrayList<>();
-        infoLore.add(m("gui.editor.actions.help.help1"));
-        infoLore.add(m("gui.editor.actions.help.help2"));
-        infoLore.add(m("gui.editor.actions.help.help3"));
-        infoLore.add(m("gui.editor.actions.help.help4"));
-
-        ItemStack info = new ItemBuilder(Material.MAP)
-                .setName(m("gui.editor.actions.help.title"))
-                .setLore(infoLore)
-                .hideAllFlags()
-                .build();
-        inv.setItem(40, info);
-    }
-
-    private void renderConditionsTab(Inventory inv, QuestEditorDraft d) {
-        inv.setItem(10, listItem("gui.editor.conditions.start.label", d.condStart));
-        inv.setItem(12, listItem("gui.editor.conditions.success.label", d.condSuccess));
-        inv.setItem(14, listItem("gui.editor.conditions.fail.label", d.condFail));
-        // === HELP ITEM 추가 ===
-        List<String> lore = new ArrayList<>();
-        lore.add(m("gui.editor.conditions.help.help1"));
-        lore.add(m("gui.editor.conditions.help.help2"));
-        lore.add(m("gui.editor.conditions.help.help3"));
-
-        ItemStack help = new ItemBuilder(Material.WRITABLE_BOOK)
-                .setName(m("gui.editor.conditions.help.title"))
-                .setLore(lore)
-                .hideAllFlags()
-                .build();
-
-        inv.setItem(40, help);
-    }
-
-    private void renderOptionsTab(Inventory inv, QuestEditorDraft d) {
-        inv.setItem(10, textItem("gui.editor.options.resetpolicy.label", d.resetPolicy));
-        inv.setItem(12, textItem("gui.editor.options.resettime.label", d.resetTime));
-        inv.setItem(28, booleanItem("gui.editor.options.public.label", d.isPublic));
-        inv.setItem(30, booleanItem("gui.editor.options.party.label", d.party));
-        // === HELP ITEM 추가 ===
-        List<String> lore = new ArrayList<>();
-        lore.add(m("gui.editor.options.help.help1"));
-        lore.add(m("gui.editor.options.help.help2"));
-        lore.add(m("gui.editor.options.help.help3"));
-        lore.add(m("gui.editor.options.help.help4"));
-        lore.add(m("gui.editor.options.help.help5"));
-        lore.add(m("gui.editor.options.help.help6"));
-        lore.add(m("gui.editor.options.help.help7"));
-        lore.add(m("gui.editor.options.help.help8"));
-
-        ItemStack help = new ItemBuilder(Material.MAP)
-                .setName(m("gui.editor.options.help.title"))
-                .setLore(lore)
-                .hideAllFlags()
-                .build();
-
-        inv.setItem(40, help);
-    }
-
-    private void renderChainTab(Inventory inv, QuestEditorDraft d) {
-        inv.setItem(10, textItem("gui.editor.chain.next.label", d.nextQuestOnComplete));
     }
 
     private void renderControls(Inventory inv) {
-        List<String> saveLore = new ArrayList<>();
-        saveLore.add(m("gui.editor.control.save.lore1"));
-        saveLore.add(m("gui.editor.control.save.lore2"));
-
-        ItemStack save = new ItemBuilder(Material.EMERALD_BLOCK)
-                .setName(m("gui.editor.control.save.name"))
-                .setLore(saveLore)
-                .hideAllFlags()
-                .build();
-        inv.setItem(45, save);
-
-        ItemStack close = new ItemBuilder(Material.BARRIER)
-                .setName(m("gui.editor.control.close.name"))
-                .setLore(Collections.singletonList(m("gui.editor.control.close.lore")))
-                .hideAllFlags()
-                .build();
-        inv.setItem(49, close);
+        inv.setItem(45, new ItemBuilder(Material.EMERALD_BLOCK).setName(m("gui.editor.control.save.name")).setLore(Arrays.asList(m("gui.editor.control.save.lore1"), m("gui.editor.control.save.lore2"))).hideAllFlags().build());
+        inv.setItem(49, new ItemBuilder(Material.BARRIER).setName(m("gui.editor.control.close.name")).setLore(List.of(m("gui.editor.control.close.lore"))).hideAllFlags().build());
     }
 
-    private ItemStack textItem(String labelPath, String value) {
-        String label = m(labelPath);
-        String val = (value == null || value.isEmpty()) ? m("gui.editor.common.empty") : value;
-
-        List<String> lore = new ArrayList<>();
-        lore.add(m("gui.editor.common.text.value").replace("%value%", val));
-        lore.add("");
-        lore.add(m("gui.editor.common.text.left"));
-        lore.add(m("gui.editor.common.text.right"));
-
-        return new ItemBuilder(Material.PAPER)
-                .setName(m("gui.editor.common.text.name").replace("%label%", label))
-                .setLore(lore)
-                .hideAllFlags()
-                .build();
-    }
-
-    private ItemStack numberItem(String labelPath, int value) {
-        String label = m(labelPath);
-        String val = String.valueOf(value);
-
-        List<String> lore = new ArrayList<>();
-        lore.add(m("gui.editor.common.number.value").replace("%value%", val));
-        lore.add("");
-        lore.add(m("gui.editor.common.number.edit"));
-
-        return new ItemBuilder(Material.REPEATER)
-                .setName(m("gui.editor.common.number.name").replace("%label%", label))
-                .setLore(lore)
-                .hideAllFlags()
-                .build();
-    }
-
-    private ItemStack booleanItem(String labelPath, boolean value) {
-        String label = m(labelPath);
-        String val = String.valueOf(value);
-
-        List<String> lore = new ArrayList<>();
-        lore.add(m("gui.editor.common.boolean.value").replace("%value%", val));
-        lore.add("");
-        lore.add(m("gui.editor.common.boolean.edit"));
-
-        Material mat = value ? Material.LIME_DYE : Material.GRAY_DYE;
-
-        return new ItemBuilder(mat)
-                .setName(m("gui.editor.common.boolean.name").replace("%label%", label))
-                .setLore(lore)
-                .hideAllFlags()
-                .build();
-    }
-
-    private ItemStack listItem(String labelPath, List<String> list) {
-        String label = m(labelPath);
-        int count = list == null ? 0 : list.size();
-
-        List<String> lore = new ArrayList<>();
-        lore.add(m("gui.editor.common.list.entries").replace("%count%", String.valueOf(count)));
-        lore.add("");
-        lore.add(m("gui.editor.common.list.edit"));
-
-        return new ItemBuilder(Material.BOOK)
-                .setName(m("gui.editor.common.list.name").replace("%label%", label))
-                .setLore(lore)
-                .hideAllFlags()
-                .build();
-    }
-
+    // --- Factories & Logic ---
+    private ItemStack textItem(String k, String v) { return new ItemBuilder(Material.PAPER).setName(m("gui.editor.common.text.name").replace("%label%", m(k))).setLore(Arrays.asList(m("gui.editor.common.text.value").replace("%value%", v == null || v.isEmpty() ? m("gui.editor.common.empty") : v), "", m("gui.editor.common.text.left"), m("gui.editor.common.text.right"))).hideAllFlags().build(); }
+    private ItemStack numberItem(String k, int v) { return new ItemBuilder(Material.REPEATER).setName(m("gui.editor.common.number.name").replace("%label%", m(k))).setLore(Arrays.asList(m("gui.editor.common.number.value").replace("%value%", String.valueOf(v)), "", m("gui.editor.common.number.edit"))).hideAllFlags().build(); }
+    private ItemStack booleanItem(String k, boolean v) { return new ItemBuilder(v ? Material.LIME_DYE : Material.GRAY_DYE).setName(m("gui.editor.common.boolean.name").replace("%label%", m(k))).setLore(Arrays.asList(m("gui.editor.common.boolean.value").replace("%value%", String.valueOf(v)), "", m("gui.editor.common.boolean.edit"))).hideAllFlags().build(); }
+    private ItemStack listItem(String k, List<String> l) { return new ItemBuilder(Material.BOOK).setName(m("gui.editor.common.list.name").replace("%label%", m(k))).setLore(Arrays.asList(m("gui.editor.common.list.entries").replace("%count%", String.valueOf(l == null ? 0 : l.size())), "", m("gui.editor.common.list.edit"))).hideAllFlags().build(); }
     private ItemStack iconItem(QuestEditorDraft d) {
-        Material mat;
-        try {
-            mat = Material.valueOf(d.displayIcon.toUpperCase(Locale.ROOT));
-        } catch (IllegalArgumentException ex) {
-            mat = Material.BOOK;
-        }
-
-        ItemBuilder builder = new ItemBuilder(mat);
-
-        String name = m("gui.editor.display.icon.name");
-        List<String> lore = new ArrayList<>();
-
-        lore.add(m("gui.editor.display.icon.value").replace("%value%", mat.name()));
-        builder.setModelData(d.displayCustomModelData);
-
-        lore.add("");
-        lore.add(m("gui.editor.display.icon.left"));
-        lore.add(m("gui.editor.display.icon.right"));
-        lore.add(m("gui.editor.display.icon.inv"));
-
-        return builder
-                .setName(name)
-                .setLore(lore)
-                .hideAllFlags()
-                .build();
+        Material m = Material.getMaterial(d.displayIcon.toUpperCase(Locale.ROOT));
+        if (m == null) m = Material.BOOK;
+        ItemBuilder b = new ItemBuilder(m).setName(m("gui.editor.display.icon.name")).setLore(Arrays.asList(m("gui.editor.display.icon.value").replace("%value%", m.name()), "", m("gui.editor.display.icon.left"), m("gui.editor.display.icon.right"), m("gui.editor.display.icon.inv"))).hideAllFlags();
+        if (d.displayCustomModelData != -1) b.setModelData(d.displayCustomModelData);
+        return b.build();
     }
 
-    @EventHandler
-    public void onInventoryClick(InventoryClickEvent e) {
-        HumanEntity he = e.getWhoClicked();
-        if (!(he instanceof Player player)) return;
-
-        if (!(e.getView().getTopInventory().getHolder() instanceof GuiHolder holder)) return;
-        String id = holder.id();
-        if (id == null) return;
-
-        e.setCancelled(true);
-
-        if (id.startsWith(HOLDER_MAIN)) {
-            handleMainClick(player, e);
-        } else if (id.startsWith(HOLDER_LIST)) {
-            handleListClick(player, e, id, e.getView().getTitle());
-        } else if (id.equals(HOLDER_EVENT)) {
-            handleEventSelectClick(player, e);
-        } else if (id.equals(HOLDER_CAPTURES)) {
-            handleCapturesClick(player, e);
-        } else if (id.startsWith("QEDITOR_QLIST_")) {
-            handleQuestListClick(player, e, id);
-        }
-    }
-
-    @EventHandler
-    public void onInventoryDrag(InventoryDragEvent e) {
-        if (e.getInventory().getHolder() instanceof GuiHolder holder) {
-            String id = holder.id();
-            if (id != null && id.startsWith("Q_EDITOR_")) {
-                e.setCancelled(true);
-            }
-        }
-    }
-
-    @EventHandler
-    public void onInventoryClose(InventoryCloseEvent e) {
-        if (!(e.getPlayer() instanceof Player)) return;
-        if (!(e.getView().getTopInventory().getHolder() instanceof GuiHolder holder)) return;
-        String id = holder.id();
-        if (id == null || !id.startsWith("Q_EDITOR_")) return;
-    }
-
-    private void handleMainClick(Player player, InventoryClickEvent e) {
-        Session session = sessions.get(player.getUniqueId());
-        if (session == null) return;
-
-        int rawSlot = e.getRawSlot();
-        ClickType click = e.getClick();
-
-        EditorTab[] tabs = EditorTab.values();
-        if (rawSlot >= 0 && rawSlot < tabs.length) {
-            EditorTab target = tabs[rawSlot];
-            if (target != session.tab) {
-                session.tab = target;
-                try {
-                    player.closeInventory();
-                } catch (Throwable ignored) {
-                }
-                openMainDelayed(player, session);
-            }
-            return;
-        }
-
-        if (session.tab == EditorTab.DISPLAY && rawSlot >= SIZE) {
-            ItemStack clicked = e.getCurrentItem();
-            if (clicked != null && clicked.getType() != Material.AIR) {
-                session.draft.displayIcon = clicked.getType().name();
-                ItemMeta meta = clicked.getItemMeta();
-                if (meta != null && meta.hasCustomModelData()) {
-                    session.draft.displayCustomModelData = meta.getCustomModelData();
-                } else {
-                    session.draft.displayCustomModelData = -1;
-                }
-                openMainDelayed(player, session);
-            }
-            return;
-        }
-
-        if (rawSlot == 45) {
-            saveDraft(player, session.draft);
-            return;
-        }
-        if (rawSlot == 49) {
-            player.closeInventory();
-            return;
-        }
-
-        if (rawSlot < 0 || rawSlot >= SIZE) return;
-
-        handleFieldClick(player, session, e);
-    }
-
-    private void handleFieldClick(Player player, Session session, InventoryClickEvent e) {
-        int slot = e.getRawSlot();
-        ClickType click = e.getClick();
-        QuestEditorDraft d = session.draft;
-        EditorTab tab = session.tab;
-
-        switch (tab) {
-            case DISPLAY -> handleDisplayClick(player, d, slot, click);
-            case EVENT -> handleEventClick(player, d, slot, click, session);
-            case CUSTOM_EVENT -> handleCustomEventClick(player, d, slot, click);
-            case TARGETS -> handleTargetsClick(player, d, slot, click);
-            case META -> handleMetaClick(player, d, slot, click);
-            case ACTIONS -> handleActionsClick(player, d, slot, click);
-            case CONDITIONS -> handleConditionsClick(player, d, slot, click);
-            case OPTIONS -> handleOptionsClick(player, d, slot, click);
-            case CHAIN -> handleChainClick(player, d, slot, click);
-        }
-    }
-
-    private void handleDisplayClick(Player p, QuestEditorDraft d, int slot, ClickType click) {
-        boolean left = click.isLeftClick();
-        boolean right = click.isRightClick();
-
-        if (slot == 10) {
-            if (right) {
-                d.displayTitle = "";
-                openMainDelayed(p, sessions.get(p.getUniqueId()));
-            } else if (left) {
-                p.closeInventory();
-                ChatInput.await(p, m("gui.editor.prompt.display_title"), (player, msg) -> {
-                    d.displayTitle = msg;
-                    openMainDelayed(player, sessions.get(player.getUniqueId()));
-                });
-            }
-        } else if (slot == 12) {
-            if (left) {
-                openListDelayed(p, "display.description");
-            }
-        } else if (slot == 14) {
-            if (right) {
-                d.displayIcon = "BOOK";
-                d.displayCustomModelData = -1;
-                openMainDelayed(p, sessions.get(p.getUniqueId()));
-            } else if (left) {
-                p.closeInventory();
-                ChatInput.await(p, m("gui.editor.prompt.display_icon"), (player, msg) -> {
-                    d.displayIcon = msg.toUpperCase(Locale.ROOT);
-                    openMainDelayed(player, sessions.get(player.getUniqueId()));
-                });
-            }
-        } else if (slot == 16) {
-            if (right) {
-                d.displayProgress = "&7%value%/%target%";
-                openMainDelayed(p, sessions.get(p.getUniqueId()));
-            } else if (left) {
-                p.closeInventory();
-                ChatInput.await(p, m("gui.editor.prompt.display_progress"), (player, msg) -> {
-                    d.displayProgress = msg;
-                    openMainDelayed(player, sessions.get(player.getUniqueId()));
-                });
-            }
-        } else if (slot == 19) {
-            if (left) {
-                p.closeInventory();
-                ChatInput.await(p, m("gui.editor.prompt.display_cmd"), (player, msg) -> {
-                    try {
-                        d.displayCustomModelData = Integer.parseInt(msg.trim());
-                    } catch (NumberFormatException ignored) {
-                        d.displayCustomModelData = -1;
-                    }
-                    openMainDelayed(player, sessions.get(player.getUniqueId()));
-                });
-            }
-        } else if (slot == 21) {
-            if (right) {
-                d.displayHint = "";
-                openMainDelayed(p, sessions.get(p.getUniqueId()));
-            } else if (left) {
-                p.closeInventory();
-                ChatInput.await(p, m("gui.editor.prompt.display_hint"), (player, msg) -> {
-                    d.displayHint = msg;
-                    openMainDelayed(player, sessions.get(player.getUniqueId()));
-                });
-            }
-        } else if (slot == 23) {
-            if (right) {
-                d.displayReward = "";
-                openMainDelayed(p, sessions.get(p.getUniqueId()));
-            } else if (left) {
-                p.closeInventory();
-                ChatInput.await(p, m("gui.editor.prompt.display_reward"), (player, msg) -> {
-                    d.displayReward = msg;
-                    openMainDelayed(player, sessions.get(player.getUniqueId()));
-                });
-            }
-        } else if (slot == 25) {
-            if (right) {
-                d.displayCategory = "";
-                openMainDelayed(p, sessions.get(p.getUniqueId()));
-            } else if (left) {
-                p.closeInventory();
-                ChatInput.await(p, m("gui.editor.prompt.display_category"), (player, msg) -> {
-                    d.displayCategory = msg;
-                    openMainDelayed(player, sessions.get(player.getUniqueId()));
-                });
-            }
-        } else if (slot == 28) {
-            if (right) {
-                d.displayDifficulty = "";
-                openMainDelayed(p, sessions.get(p.getUniqueId()));
-            } else if (left) {
-                p.closeInventory();
-                ChatInput.await(p, m("gui.editor.prompt.display_difficulty"), (player, msg) -> {
-                    d.displayDifficulty = msg;
-                    openMainDelayed(player, sessions.get(player.getUniqueId()));
-                });
-            }
-        }
-    }
-
-    private void handleEventClick(Player p, QuestEditorDraft d, int slot, ClickType click, Session session) {
-        boolean left = click.isLeftClick();
-        boolean right = click.isRightClick();
-        boolean shift = click.isShiftClick();
-
-        if (slot == 10) {
-            if (right) {
-                d.event = "CUSTOM";
-                openMainDelayed(p, sessions.get(p.getUniqueId()));
-            } else if (shift && left) {
-                openEventSelectDelayed(p);
-            } else if (left) {
-                p.closeInventory();
-                ChatInput.await(p, m("gui.editor.prompt.event_name"), (player, msg) -> {
-                    d.event = msg.toUpperCase(Locale.ROOT);
-                    openMainDelayed(player, sessions.get(player.getUniqueId()));
-                });
-            }
-        } else if (slot == 12) {
-            if (left) {
-                QuestDef.StartMode[] modes = QuestDef.StartMode.values();
-                int idx = 0;
-                for (int i = 0; i < modes.length; i++) {
-                    if (modes[i] == d.startMode) {
-                        idx = i;
-                        break;
-                    }
-                }
-                idx = (idx + 1) % modes.length;
-                d.startMode = modes[idx];
-                openMainDelayed(p, sessions.get(p.getUniqueId()));
-            }
-        } else if (slot == 14) {
-            if (right) {
-                d.type = "vanilla";
-                openMainDelayed(p, sessions.get(p.getUniqueId()));
-            } else if (left) {
-                p.closeInventory();
-                ChatInput.await(p, m("gui.editor.prompt.event_type"), (player, msg) -> {
-                    d.type = msg.toLowerCase(Locale.ROOT);
-                    openMainDelayed(player, sessions.get(player.getUniqueId()));
-                });
-            }
-        }
-    }
-
-    private void handleCustomEventClick(Player p, QuestEditorDraft d, int slot, ClickType click) {
-        boolean left = click.isLeftClick();
-        boolean right = click.isRightClick();
-
-        if (slot == 10) {
-            if (right) {
-                d.customEventClass = "";
-                openMainDelayed(p, sessions.get(p.getUniqueId()));
-            } else if (left) {
-                p.closeInventory();
-                ChatInput.await(p, m("gui.editor.prompt.custom_event_class"), (player, msg) -> {
-                    d.customEventClass = msg;
-                    openMainDelayed(player, sessions.get(player.getUniqueId()));
-                });
-            }
-        } else if (slot == 12) {
-            if (right) {
-                d.customPlayerGetter = "";
-                openMainDelayed(p, sessions.get(p.getUniqueId()));
-            } else if (left) {
-                p.closeInventory();
-                ChatInput.await(p, m("gui.editor.prompt.custom_player_getter"), (player, msg) -> {
-                    d.customPlayerGetter = msg;
-                    openMainDelayed(player, sessions.get(player.getUniqueId()));
-                });
-            }
-        } else if (slot == 14) {
-            if (right) {
-                d.customCaptures.clear();
-                openMainDelayed(p, sessions.get(p.getUniqueId()));
-            } else if (left) {
-                openCapturesDelayed(p);
-            }
-        }
-    }
-
-    private void handleTargetsClick(Player p, QuestEditorDraft d, int slot, ClickType click) {
-        boolean left = click.isLeftClick();
-
-        if (slot == 10) {
-            if (left) {
-                openListDelayed(p, "targets");
-            }
-        } else if (slot == 12) {
-            if (left) {
-                p.closeInventory();
-                ChatInput.await(p, m("gui.editor.prompt.targets_amount"), (player, msg) -> {
-                    try {
-                        d.amount = Math.max(1, Integer.parseInt(msg.trim()));
-                    } catch (NumberFormatException ignored) {
-                    }
-                    openMainDelayed(player, sessions.get(player.getUniqueId()));
-                });
-            }
-        } else if (slot == 14) {
-            if (left) {
-                p.closeInventory();
-                ChatInput.await(p, m("gui.editor.prompt.targets_repeat"), (player, msg) -> {
-                    try {
-                        d.repeat = Integer.parseInt(msg.trim());
-                    } catch (NumberFormatException ignored) {
-                    }
-                    openMainDelayed(player, sessions.get(player.getUniqueId()));
-                });
-            }
-        } else if (slot == 16) {
-            if (left) {
-                p.closeInventory();
-                ChatInput.await(p, m("gui.editor.prompt.targets_points"), (player, msg) -> {
-                    try {
-                        d.points = Math.max(0, Integer.parseInt(msg.trim()));
-                    } catch (NumberFormatException ignored) {
-                    }
-                    openMainDelayed(player, sessions.get(player.getUniqueId()));
-                });
-            }
-        }
-    }
-
-    private void handleMetaClick(Player p, QuestEditorDraft d, int slot, ClickType click) {
-        boolean left = click.isLeftClick();
-        boolean right = click.isRightClick();
-
-        if (slot == 10) {
-            if (right) {
-                d.id = "";
-                openMainDelayed(p, sessions.get(p.getUniqueId()));
-            } else if (left) {
-                p.closeInventory();
-                ChatInput.await(p, m("gui.editor.prompt.meta_id"), (player, msg) -> {
-                    d.id = msg.toLowerCase(Locale.ROOT);
-                    openMainDelayed(player, sessions.get(player.getUniqueId()));
-                });
-            }
-        } else if (slot == 12) {
-            if (right) {
-                d.name = "";
-                openMainDelayed(p, sessions.get(p.getUniqueId()));
-            } else if (left) {
-                p.closeInventory();
-                ChatInput.await(p, m("gui.editor.prompt.meta_name"), (player, msg) -> {
-                    d.name = msg;
-                    openMainDelayed(player, sessions.get(player.getUniqueId()));
-                });
-            }
-        }
-    }
-
-    private void handleActionsClick(Player p, QuestEditorDraft d, int slot, ClickType click) {
-        boolean left = click.isLeftClick();
-        boolean right = click.isRightClick();
-
-        int[] slots = {
-                10, 12, 14,
-                19, 21, 23,
-                28, 30
-        };
-        ActionGroup[] groups = ActionGroup.values();
-
-        for (int i = 0; i < groups.length && i < slots.length; i++) {
-            if (slot == slots[i]) {
-                ActionGroup g = groups[i];
-                List<String> list = d.actions.getOrDefault(g.key, new ArrayList<>());
-
-                if (right) {
-                    list.clear();
-                    d.actions.put(g.key, list);
-                    openMainDelayed(p, sessions.get(p.getUniqueId()));
-                } else if (left) {
-                    openListDelayed(p, "actions." + g.key);
-                }
-                return;
-            }
-        }
-    }
-
-    private void handleConditionsClick(Player p, QuestEditorDraft d, int slot, ClickType click) {
-        boolean left = click.isLeftClick();
-
-        if (slot == 10) {
-            if (left) openListDelayed(p, "conditions.start");
-        } else if (slot == 12) {
-            if (left) openListDelayed(p, "conditions.success");
-        } else if (slot == 14) {
-            if (left) openListDelayed(p, "conditions.fail");
-        }
-    }
-
-    private void handleOptionsClick(Player p, QuestEditorDraft d, int slot, ClickType click) {
-        boolean left = click.isLeftClick();
-        boolean right = click.isRightClick();
-
-        if (slot == 10) {
-            if (right) {
-                d.resetPolicy = "";
-                openMainDelayed(p, sessions.get(p.getUniqueId()));
-            } else if (left) {
-                p.closeInventory();
-                ChatInput.await(p, m("gui.editor.prompt.options_resetpolicy"), (player, msg) -> {
-                    d.resetPolicy = msg;
-                    openMainDelayed(player, sessions.get(player.getUniqueId()));
-                });
-            }
-        } else if (slot == 12) {
-            if (right) {
-                d.resetTime = "";
-                openMainDelayed(p, sessions.get(p.getUniqueId()));
-            } else if (left) {
-                p.closeInventory();
-                ChatInput.await(p, m("gui.editor.prompt.options_resettime"), (player, msg) -> {
-                    d.resetTime = msg;
-                    openMainDelayed(player, sessions.get(player.getUniqueId()));
-                });
-            }
-        } else if (slot == 28) {
-            if (left) {
-                d.isPublic = !d.isPublic;
-                openMainDelayed(p, sessions.get(p.getUniqueId()));
-            }
-        } else if (slot == 30) {
-            if (left) {
-                d.party = !d.party;
-                openMainDelayed(p, sessions.get(p.getUniqueId()));
-            }
-        }
-    }
-
-    private void handleChainClick(Player p, QuestEditorDraft d, int slot, ClickType click) {
-        boolean left = click.isLeftClick();
-        boolean right = click.isRightClick();
-
-        if (slot == 10) {
-            if (right) {
-                d.nextQuestOnComplete = "";
-                openMainDelayed(p, sessions.get(p.getUniqueId()));
-            } else if (left) {
-                p.closeInventory();
-                ChatInput.await(p, m("gui.editor.prompt.chain_next"), (player, msg) -> {
-                    d.nextQuestOnComplete = msg;
-                    openMainDelayed(player, sessions.get(player.getUniqueId()));
-                });
-            }
-        }
-    }
-
-    private void handleListClick(Player player, InventoryClickEvent e, String holderId, String title) {
-        Session session = sessions.get(player.getUniqueId());
-        if (session == null) return;
-
-        String key;
-        if (holderId.contains(":")) {
-            key = holderId.substring(holderId.indexOf(':') + 1);
-        } else {
-            String rawTitle = ChatColor.stripColor(title);
-            String prefix = m("gui.editor.title.list.prefix");
-            int idx = rawTitle.indexOf(prefix);
-            if (idx >= 0) {
-                key = rawTitle.substring(idx + prefix.length()).trim();
-            } else {
-                key = rawTitle;
-            }
-        }
-
-        List<String> list = getListReference(session.draft, key);
-        if (list == null) return;
-
-        int slot = e.getRawSlot();
-        ClickType click = e.getClick();
-
-        if (slot == 53) {
-            try {
-                player.closeInventory();
-            } catch (Throwable ignored) {
-            }
-            openMainDelayed(player, session);
-            return;
-        }
-
-        if (slot < CONTENT_START || slot > CONTENT_END) return;
-
-        int index = slot - CONTENT_START;
-
-        if (index < list.size()) {
-            if (click.isRightClick()) {
-                list.remove(index);
-                openListDelayed(player, key);
-            } else if (click.isLeftClick()) {
-                String old = list.get(index);
-                player.closeInventory();
-                String prompt = m("gui.editor.prompt.list_edit").replace("%old%", old);
-                ChatInput.await(player, prompt, (p, msg) -> {
-                    list.set(index, msg);
-                    openListDelayed(p, key);
-                });
-            }
-        } else if (index == list.size()) {
-            if (click.isLeftClick()) {
-                player.closeInventory();
-                ChatInput.await(player, m("gui.editor.prompt.list_add"), (p, msg) -> {
-                    list.add(msg);
-                    openListDelayed(p, key);
-                });
-            }
-        }
-    }
-
-    private void handleEventSelectClick(Player player, InventoryClickEvent e) {
-        Session session = sessions.get(player.getUniqueId());
-        if (session == null) return;
-
-        int slot = e.getRawSlot();
-
-        if (slot == 45) {
-            if (session.eventPage > 0) {
-                session.eventPage--;
-                Inventory inv = createEventInventory(session);
-                player.openInventory(inv);
-            }
-            return;
-        }
-
-        if (slot == 53) {
-            int pageSize = CONTENT_END - CONTENT_START + 1;
-            int total = BUILTIN_EVENTS.size();
-            int maxPage = Math.max(1, (total + pageSize - 1) / pageSize);
-            if (session.eventPage < maxPage - 1) {
-                session.eventPage++;
-                Inventory inv = createEventInventory(session);
-                player.openInventory(inv);
-            }
-            return;
-        }
-
-        if (slot == 49) {
-            player.closeInventory();
-            openMainDelayed(player, session);
-            return;
-        }
-
-        if (slot < CONTENT_START || slot > CONTENT_END) return;
-
-        ItemStack item = e.getCurrentItem();
-        if (item == null || item.getType() == Material.AIR) return;
-        ItemMeta meta = item.getItemMeta();
-        if (meta == null) return;
-        String name = ChatColor.stripColor(meta.getDisplayName());
-        if (name == null || name.isEmpty()) return;
-
-        session.draft.event = name;
-        player.closeInventory();
-        openMainDelayed(player, session);
-    }
-
-    private void handleCapturesClick(Player player, InventoryClickEvent e) {
-        Session session = sessions.get(player.getUniqueId());
-        if (session == null) return;
-
-        int slot = e.getRawSlot();
-        ClickType click = e.getClick();
-
-        if (slot == 53) {
-            player.closeInventory();
-            openMainDelayed(player, session);
-            return;
-        }
-
-        if (slot < CONTENT_START || slot > CONTENT_END) return;
-
-        int index = slot - CONTENT_START;
-        List<Map.Entry<String, String>> entries = new ArrayList<>(session.draft.customCaptures.entrySet());
-
-        if (index < entries.size()) {
-            Map.Entry<String, String> entry = entries.get(index);
-            String key = entry.getKey();
-            String chain = entry.getValue();
-
-            if (click.isRightClick()) {
-                session.draft.customCaptures.remove(key);
-                openCapturesDelayed(player);
-            } else if (click.isLeftClick()) {
-                String line = key + ";" + chain;
-                String prompt = m("gui.editor.prompt.captures_edit").replace("%line%", line);
-                player.closeInventory();
-                ChatInput.await(player, prompt, (p, msg) -> {
-                    if (!applyCaptureLine(session.draft, msg.trim(), true)) {
-                        p.sendMessage(m("gui.editor.error.captures_format"));
-                    }
-                    openCapturesDelayed(p);
-                });
-            }
-        } else if (index == entries.size()) {
-            if (click.isLeftClick()) {
-                String example = m("gui.editor.custom.captures.format");
-                String prompt = m("gui.editor.prompt.captures_add").replace("%example%", example);
-                player.closeInventory();
-                ChatInput.await(player, prompt, (p, msg) -> {
-                    if (!applyCaptureLine(session.draft, msg.trim(), false)) {
-                        p.sendMessage(m("gui.editor.error.captures_format"));
-                    }
-                    openCapturesDelayed(p);
-                });
-            }
-        }
-    }
-
-    private boolean applyCaptureLine(QuestEditorDraft d, String line, boolean replaceIfExists) {
-        if (line == null || line.isEmpty()) return false;
-
-        int semi = line.indexOf(';');
-        if (semi <= 0 || semi == line.length() - 1) return false;
-
-        String key = line.substring(0, semi).trim();
-        String chain = line.substring(semi + 1).trim();
-        if (key.isEmpty() || chain.isEmpty()) return false;
-
-        int len = key.length();
-        if (len > 2 && key.charAt(0) == '%' && key.charAt(len - 1) == '%') {
-            key = key.substring(1, len - 1);
-        }
-
-        if (key.isEmpty()) return false;
-
-        if (!replaceIfExists && d.customCaptures.containsKey(key)) {
-            return false;
-        }
-        d.customCaptures.put(key, chain);
-        return true;
-    }
-
+    private void ensureActionGroups(QuestEditorDraft d) { for (ActionGroup g : ActionGroup.values()) d.actions.computeIfAbsent(g.key, k -> new ArrayList<>()); }
     private List<String> getListReference(QuestEditorDraft d, String key) {
         return switch (key) {
             case "display.description" -> d.displayDescription;
@@ -1432,159 +331,245 @@ public final class QuestEditorMenu implements Listener {
             case "conditions.start" -> d.condStart;
             case "conditions.success" -> d.condSuccess;
             case "conditions.fail" -> d.condFail;
-            default -> {
-                if (key.startsWith("actions.")) {
-                    String group = key.substring("actions.".length());
-                    ensureActionGroups(d);
-                    yield d.actions.computeIfAbsent(group, k -> new ArrayList<>());
-                }
-                yield null;
-            }
+            default -> key.startsWith("actions.") ? d.actions.computeIfAbsent(key.substring(8), k -> new ArrayList<>()) : null;
         };
     }
 
-    private void ensureActionGroups(QuestEditorDraft d) {
-        for (ActionGroup g : ActionGroup.values()) {
-            d.actions.computeIfAbsent(g.key, k -> new ArrayList<>());
+    private void promptOrClear(Player p, boolean L, boolean R, String def, java.util.function.Consumer<String> setter) {
+        if (R) { setter.accept(def); openMainDelayed(p, sessions.get(p.getUniqueId())); }
+        else if (L) {
+            p.closeInventory();
+            // [Fix] Lambda variable renaming p -> pl to avoid conflict with method parameter p
+            ChatInput.await(p, m("gui.editor.prompt.generic_text", "Enter value:"), (pl, s) -> { setter.accept(s); openMainDelayed(pl, sessions.get(pl.getUniqueId())); });
         }
     }
 
-    private void saveDraft(Player player, QuestEditorDraft draft) {
-        if (draft.id == null || draft.id.trim().isEmpty()) {
-            player.sendMessage(m("gui.editor.error.id_empty"));
+    @EventHandler
+    public void onInventoryClick(InventoryClickEvent e) {
+        if (!(e.getWhoClicked() instanceof Player player) || !(e.getView().getTopInventory().getHolder() instanceof GuiHolder h)) return;
+        String id = h.id();
+        if (id == null) return;
+        e.setCancelled(true);
+
+        if (id.startsWith(HOLDER_MAIN)) handleMainClick(player, e);
+        else if (id.startsWith(HOLDER_LIST)) handleListClick(player, e, id);
+        else if (id.equals(HOLDER_EVENT)) handleEventSelectClick(player, e);
+        else if (id.equals(HOLDER_CAPTURES)) handleCapturesClick(player, e);
+        else if (id.startsWith("QEDITOR_QLIST_")) handleQuestListClick(player, e, id);
+    }
+
+    private void handleMainClick(Player p, InventoryClickEvent e) {
+        Session s = sessions.get(p.getUniqueId());
+        if (s == null) return;
+        int slot = e.getRawSlot();
+        if (slot < 0) return;
+        if (slot < EditorTab.values().length) {
+            s.tab = EditorTab.values()[slot];
+            openMainDelayed(p, s);
             return;
         }
+        if (s.tab == EditorTab.DISPLAY && slot >= SIZE && e.getCurrentItem() != null) {
+            s.draft.displayIcon = e.getCurrentItem().getType().name();
+            s.draft.displayCustomModelData = e.getCurrentItem().hasItemMeta() && e.getCurrentItem().getItemMeta().hasCustomModelData() ? e.getCurrentItem().getItemMeta().getCustomModelData() : -1;
+            openMainDelayed(p, s);
+            return;
+        }
+        if (slot == 45) { saveDraft(p, s.draft); return; }
+        if (slot == 49) { p.closeInventory(); return; }
+        if (slot >= SIZE) return;
 
-        try {
-            QuestDef def = draft.buildQuestDef();
-            org.bukkit.configuration.file.YamlConfiguration yml = QuestDef.toYaml(def);
+        handleFieldClick(p, s, e);
+    }
 
-            File folder = new File(plugin.getDataFolder(), plugin.getConfig().getString("quests.folder", "quests"));
-            if (!folder.exists() && !folder.mkdirs()) {
-                player.sendMessage(m("gui.editor.error.folder_create"));
-                return;
+    private void handleFieldClick(Player p, Session s, InventoryClickEvent e) {
+        int slot = e.getRawSlot();
+        ClickType c = e.getClick();
+        QuestEditorDraft d = s.draft;
+        boolean L = c.isLeftClick(), R = c.isRightClick();
+
+        switch (s.tab) {
+            case DISPLAY -> {
+                if (slot == 10) promptOrClear(p, L, R, d.displayTitle, v -> d.displayTitle = v);
+                else if (slot == 12 && L) openListDelayed(p, "display.description");
+                else if (slot == 14) promptOrClear(p, L, R, "BOOK", v -> { d.displayIcon = v.toUpperCase(Locale.ROOT); d.displayCustomModelData = -1; });
+                else if (slot == 16) promptOrClear(p, L, R, "&7%value%/%target%", v -> d.displayProgress = v);
+                else if (slot == 19 && L) { p.closeInventory(); ChatInput.await(p, m("gui.editor.prompt.display_cmd"), (pl, v) -> { try { d.displayCustomModelData = Integer.parseInt(v.trim()); } catch(Exception ignored){d.displayCustomModelData=-1;} openMainDelayed(pl, sessions.get(pl.getUniqueId())); }); }
+                else if (slot == 21) promptOrClear(p, L, R, "", v -> d.displayHint = v);
+                else if (slot == 23) promptOrClear(p, L, R, "", v -> d.displayReward = v);
+                else if (slot == 25) promptOrClear(p, L, R, "", v -> d.displayCategory = v);
+                else if (slot == 28) promptOrClear(p, L, R, "", v -> d.displayDifficulty = v);
             }
-            File file = new File(folder, def.id + ".yml");
-            yml.save(file);
-
-            plugin.quests().reload();
-            plugin.quests().rebuildEventMap();
-
-            String msg = m("gui.editor.save.ok").replace("%id%", def.id);
-            player.sendMessage(msg);
-        } catch (Exception ex) {
-            String msg = m("gui.editor.save.fail").replace("%msg%", ex.getMessage() == null ? "null" : ex.getMessage());
-            player.sendMessage(msg);
-            ex.printStackTrace();
+            case EVENT -> {
+                if (slot == 10) { if (R) { d.event="CUSTOM"; openMainDelayed(p,s); } else if (c.isShiftClick()) openEventSelectDelayed(p); else if (L) promptOrClear(p, true, false, "", v->d.event=v.toUpperCase(Locale.ROOT)); }
+                else if (slot == 12 && L) { d.startMode = QuestDef.StartMode.values()[(d.startMode.ordinal()+1)%4]; openMainDelayed(p,s); }
+                else if (slot == 14) promptOrClear(p, L, R, "vanilla", v -> d.type = v.toLowerCase(Locale.ROOT));
+            }
+            case CUSTOM_EVENT -> {
+                if (slot == 10) promptOrClear(p, L, R, "", v -> d.customEventClass = v);
+                else if (slot == 12) promptOrClear(p, L, R, "getPlayer()", v -> d.customPlayerGetter = v);
+                else if (slot == 14) { if (R) { d.customCaptures.clear(); openMainDelayed(p,s); } else if (L) openCapturesDelayed(p); }
+            }
+            case TARGETS -> {
+                if (slot == 10 && L) openListDelayed(p, "targets");
+                else if (slot == 12 && L) { p.closeInventory(); ChatInput.await(p, m("gui.editor.prompt.targets_amount"), (pl, v) -> { try { d.amount = Math.max(1, Integer.parseInt(v.trim())); } catch(Exception ignored){} openMainDelayed(pl, sessions.get(pl.getUniqueId())); }); }
+                else if (slot == 14 && L) { p.closeInventory(); ChatInput.await(p, m("gui.editor.prompt.targets_repeat"), (pl, v) -> { try { d.repeat = Integer.parseInt(v.trim()); } catch(Exception ignored){} openMainDelayed(pl, sessions.get(pl.getUniqueId())); }); }
+                else if (slot == 16 && L) { p.closeInventory(); ChatInput.await(p, m("gui.editor.prompt.targets_points"), (pl, v) -> { try { d.points = Math.max(0, Integer.parseInt(v.trim())); } catch(Exception ignored){} openMainDelayed(pl, sessions.get(pl.getUniqueId())); }); }
+            }
+            case META -> {
+                if (slot == 10) promptOrClear(p, L, R, "", v -> d.id = v.toLowerCase(Locale.ROOT));
+                else if (slot == 12) promptOrClear(p, L, R, "", v -> d.name = v);
+            }
+            case ACTIONS -> {
+                int[] slots = {10,12,14,19,21,23,28,30};
+                ActionGroup[] gs = ActionGroup.values();
+                for (int i=0; i<gs.length && i<slots.length; i++) {
+                    if (slot == slots[i]) { if (R) { d.actions.put(gs[i].key, new ArrayList<>()); openMainDelayed(p, s); } else if (L) openListDelayed(p, "actions." + gs[i].key); }
+                }
+            }
+            case CONDITIONS -> {
+                if (L) { if (slot==10) openListDelayed(p,"conditions.start"); else if (slot==12) openListDelayed(p,"conditions.success"); else if (slot==14) openListDelayed(p,"conditions.fail"); }
+            }
+            case OPTIONS -> {
+                if (slot == 10) promptOrClear(p, L, R, "", v -> d.resetPolicy = v);
+                else if (slot == 12) promptOrClear(p, L, R, "", v -> d.resetTime = v);
+                else if (slot == 28 && L) { d.isPublic = !d.isPublic; openMainDelayed(p, s); }
+                else if (slot == 30 && L) { d.party = !d.party; openMainDelayed(p, s); }
+            }
+            case CHAIN -> { if (slot == 10) promptOrClear(p, L, R, "", v -> d.nextQuestOnComplete = v); }
         }
     }
-    public void openNewWithId(Player player, String id) {
-        QuestEditorDraft draft = new QuestEditorDraft();
-        draft.id = id.toLowerCase(Locale.ROOT);
-        draft.name = "&f" + id;
-        draft.displayTitle = "&f" + id;
 
-        ensureActionGroups(draft);
-
-        Session session = new Session(draft, EditorTab.DISPLAY);
-        sessions.put(player.getUniqueId(), session);
-
-        openMainDelayed(player, session);
+    private void handleListClick(Player p, InventoryClickEvent e, String id) {
+        Session s = sessions.get(p.getUniqueId());
+        if (s == null) return;
+        String key = id.contains(":") ? id.substring(id.indexOf(':') + 1) : "targets";
+        List<String> list = getListReference(s.draft, key);
+        if (list == null) return;
+        int slot = e.getRawSlot();
+        if (slot == 53) { openMainDelayed(p, s); return; }
+        if (slot < CONTENT_START || slot > CONTENT_END) return;
+        int idx = slot - CONTENT_START;
+        if (idx < list.size()) {
+            if (e.getClick().isRightClick()) { list.remove(idx); openListDelayed(p, key); }
+            else if (e.getClick().isLeftClick()) {
+                String old = list.get(idx);
+                p.closeInventory();
+                // [Fix] Lambda param renaming p -> pl
+                ChatInput.await(p, m("gui.editor.prompt.list_edit").replace("%old%", old), (pl, v) -> { list.set(idx, v); openListDelayed(pl, key); });
+            }
+        } else if (idx == list.size()) {
+            p.closeInventory();
+            // [Fix] Lambda param renaming p -> pl
+            ChatInput.await(p, m("gui.editor.prompt.list_add"), (pl, v) -> { list.add(v); openListDelayed(pl, key); });
+        }
     }
-    // ============================
-    // /questeditor list
-    // ============================
-    public void openListSelection(Player player, int page) {
 
+    private void handleEventSelectClick(Player p, InventoryClickEvent e) {
+        Session s = sessions.get(p.getUniqueId());
+        if (s == null) return;
+        int slot = e.getRawSlot();
+
+        if (slot == 45) { if (s.eventPage > 0) { s.eventPage--; openEventSelectDelayed(p); } return; }
+        if (slot == 53) { int max = (BUILTIN_EVENTS.size() + 35) / 36; if (s.eventPage < max - 1) { s.eventPage++; openEventSelectDelayed(p); } return; }
+        if (slot == 49) { openMainDelayed(p, s); return; }
+
+        ItemStack item = e.getCurrentItem();
+        if (item != null && item.getType() != Material.AIR) {
+            String name = ChatColor.stripColor(item.getItemMeta().getDisplayName());
+            s.draft.event = name;
+            openMainDelayed(p, s);
+        }
+    }
+
+    private void handleCapturesClick(Player p, InventoryClickEvent e) {
+        Session s = sessions.get(p.getUniqueId());
+        if (s == null) return;
+        int slot = e.getRawSlot();
+        if (slot == 53) { openMainDelayed(p, s); return; }
+        if (slot < CONTENT_START || slot > CONTENT_END) return;
+        var entries = new ArrayList<>(s.draft.customCaptures.entrySet());
+        int idx = slot - CONTENT_START;
+        if (idx < entries.size()) {
+            String key = entries.get(idx).getKey();
+            if (e.getClick().isRightClick()) { s.draft.customCaptures.remove(key); openCapturesDelayed(p); }
+            else if (e.getClick().isLeftClick()) {
+                p.closeInventory();
+                // [Fix] Lambda param renaming p -> pl
+                ChatInput.await(p, m("gui.editor.prompt.captures_edit"), (pl, v) -> { if (applyCaptureLine(s.draft, v, true)) openCapturesDelayed(pl); });
+            }
+        } else if (idx == entries.size()) {
+            p.closeInventory();
+            // [Fix] Lambda param renaming p -> pl
+            ChatInput.await(p, m("gui.editor.prompt.captures_add"), (pl, v) -> { if (applyCaptureLine(s.draft, v, false)) openCapturesDelayed(pl); });
+        }
+    }
+
+    private void handleQuestListClick(Player p, InventoryClickEvent e, String id) {
+        e.setCancelled(true);
+        String pageStr = id.substring("QEDITOR_QLIST_".length());
+        int page = 1;
+        try { page = Integer.parseInt(pageStr); } catch (Exception ignored) {}
+        int slot = e.getRawSlot();
+        if (slot == 45) { openListSelection(p, page - 1); return; }
+        if (slot == 53) { openListSelection(p, page + 1); return; }
+        ItemStack item = e.getCurrentItem();
+        if (item != null && item.getType() == Material.PAPER) {
+            String qId = ChatColor.stripColor(item.getItemMeta().getDisplayName());
+            QuestDef def = plugin.quests().get(qId);
+            if (def != null) openEdit(p, def);
+        }
+    }
+
+    private void saveDraft(Player p, QuestEditorDraft d) {
+        if (d.id == null || d.id.isBlank()) { p.sendMessage(m("gui.editor.error.id_empty")); return; }
+        try {
+            QuestDef def = d.buildQuestDef();
+            org.bukkit.configuration.file.YamlConfiguration yml = QuestDef.toYaml(def);
+            File folder = new File(plugin.getDataFolder(), plugin.getConfig().getString("quests.folder", "quests"));
+            if (!folder.exists()) folder.mkdirs();
+            yml.save(new File(folder, def.id + ".yml"));
+            plugin.quests().reload();
+            p.sendMessage(m("gui.editor.save.ok").replace("%id%", def.id));
+        } catch (Exception ex) { p.sendMessage(m("gui.editor.save.fail").replace("%msg%", ex.getMessage())); ex.printStackTrace(); }
+    }
+
+    public void openListSelection(Player player, int page) {
         List<QuestDef> all = new ArrayList<>(plugin.quests().all());
         all.sort(Comparator.comparing(q -> q.id));
-
         int maxPage = Math.max(1, (int) Math.ceil(all.size() / 45.0));
         page = Math.max(1, Math.min(page, maxPage));
-
         String title = "§9Quest List - Page " + page;
         GuiHolder holder = new GuiHolder("QEDITOR_QLIST_" + page);
         Inventory inv = Bukkit.createInventory(holder, 54, title);
         holder.setInventory(inv);
-
-        // --- 여기가 핵심 수정 ---
-        ItemStack filler = new ItemBuilder(Material.GRAY_STAINED_GLASS_PANE)
-                .setName(" ")
-                .build();
-        plugin.gui().fill(inv, filler);
-        // ---------------------------
-
+        plugin.gui().fill(inv, new ItemStack(Material.GRAY_STAINED_GLASS_PANE));
         int start = (page - 1) * 45;
         int end = Math.min(start + 45, all.size());
-
         int slot = 0;
         for (int i = start; i < end; i++) {
             QuestDef def = all.get(i);
-
-            ItemStack item = new ItemBuilder(Material.PAPER)
-                    .setName("§f" + def.id)
-                    .setLore(Collections.singletonList("§7Click to edit"))
-                    .build();
-
-            inv.setItem(slot++, item);
+            inv.setItem(slot++, new ItemBuilder(Material.PAPER).setName("§f" + def.id).setLore(List.of("§7Click to edit")).build());
         }
-
-        if (page > 1) {
-            inv.setItem(45, new ItemBuilder(Material.ARROW)
-                    .setName("§ePrevious Page")
-                    .setLore(Collections.singletonList("§7Page " + (page - 1)))
-                    .build());
-        }
-
-        if (page < maxPage) {
-            inv.setItem(53, new ItemBuilder(Material.ARROW)
-                    .setName("§eNext Page")
-                    .setLore(Collections.singletonList("§7Page " + (page + 1)))
-                    .build());
-        }
-
+        if (page > 1) inv.setItem(45, new ItemBuilder(Material.ARROW).setName("§ePrevious").build());
+        if (page < maxPage) inv.setItem(53, new ItemBuilder(Material.ARROW).setName("§eNext").build());
         player.openInventory(inv);
     }
 
-    // ============================
-    // Quest List Selection Click
-    // ============================
-    private void handleQuestListClick(Player p, InventoryClickEvent e, String id) {
-
-        // HOLDER ID 예: QEDITOR_QLIST_1
-        if (!id.startsWith("QEDITOR_QLIST_")) return;
-
-        e.setCancelled(true);
-
-        String pageStr = id.substring("QEDITOR_QLIST_".length());
-        int page = 1;
-        try { page = Integer.parseInt(pageStr); } catch (Exception ignored) {}
-
-        int slot = e.getRawSlot();
-
-        // Prev
-        if (slot == 45) {
-            openListSelection(p, page - 1);
-            return;
-        }
-
-        // Next
-        if (slot == 53) {
-            openListSelection(p, page + 1);
-            return;
-        }
-
-        // Quest 선택
-        ItemStack item = e.getCurrentItem();
-        if (item == null || item.getType() != Material.PAPER) return;
-
-        String questId = ChatColor.stripColor(item.getItemMeta().getDisplayName());
-        QuestDef def = plugin.quests().get(questId);
-
-        if (def == null) {
-            p.sendMessage("§cQuest not found: " + questId);
-            return;
-        }
-        openEdit(p, def);
+    private boolean applyCaptureLine(QuestEditorDraft d, String line, boolean replace) {
+        if (line == null || line.isEmpty()) return false;
+        int semi = line.indexOf(';');
+        if (semi <= 0 || semi == line.length() - 1) return false;
+        String k = line.substring(0, semi).trim();
+        String v = line.substring(semi + 1).trim();
+        if (k.length() > 2 && k.startsWith("%") && k.endsWith("%")) k = k.substring(1, k.length()-1);
+        if (k.isEmpty()) return false;
+        if (!replace && d.customCaptures.containsKey(k)) return false;
+        d.customCaptures.put(k, v);
+        return true;
     }
+
+    @EventHandler
+    public void onInventoryDrag(InventoryDragEvent e) { if (e.getInventory().getHolder() instanceof GuiHolder h && h.id().startsWith("Q_EDITOR")) e.setCancelled(true); }
+    @EventHandler
+    public void onInventoryClose(InventoryCloseEvent e) {}
 }

@@ -40,37 +40,25 @@ admin:
   reset_done: "&eQuest progress reset for: %quest_name%"
   list_header: "&6==== Quests of %player% ===="
   no_active: "&7No active quests."
+  points: "&e%player%'s Quest Points: &f%points%"
+  rank_calc: "&7Calculating rankings..."
 
 # ==========================================================
-# QUEST LIST
-# ==========================================================
-list:
-  empty: "&7You have no active quests."
-  header: "&e[Active Quest List]"
-  title: "&e%title% &7(%value%/%target%)"
-  desc: " &7- %desc%"
-  progress: "&fProgress %bar% &7(%percent%%)"
-  reward: "&6Reward %reward%"
-  points: "&fYour Quest Points: &a%points%"
-
-# ==========================================================
-# GUI
+# GUI COMMON
 # ==========================================================
 gui:
-  title:
-    list: "&aActive Quests"
-    public: "&bQuest Board"
-    leaderboard: "&6Leaderboard"
   lore:
     list:
       - ""
       - "&aProgress: &f%value%/%target%"
       - "&eReward: &f%reward%"
+
   confirm:
     title: "&cConfirm Quest Cancellation: %quest%"
     yes_lore: "&7Are you sure you want to cancel the quest '%quest%'?"
     no_lore: "&7No, go back."
     cancel_done: "&eThe quest '%quest%' has been cancelled."
+
   list:
     title: "&bQuest List &7| &fPage %page%"
     search: "&f🔍 Search"
@@ -89,6 +77,7 @@ gui:
     page_input: "&fGo to Page"
     page_input_lore: "&7Click and enter a page number"
     page_input_prompt: "Enter the page number to go to"
+    points: "&fYour Quest Points: &a%points%"
     left_click_start: "&aLeft-click: Start quest"
     right_click_cancel: "&cRight-click: Cancel quest"
     quest_completed: "&aQuest completed: &f%quest%"
@@ -96,6 +85,7 @@ gui:
     quest_cannot_complete: "&cYou don’t meet the completion conditions."
     quest_complete_error: "&cAn error occurred while completing the quest."
     method_missing: "&cCould not find completion method."
+
   public:
     title: "&bQuest Board | &fPage %page%"
     back: "&f← Back to My Quests"
@@ -111,19 +101,20 @@ gui:
     cancel_lore: "&cRight-click: Cancel quest"
     accepted: "&aAccepted quest '%quest%'!"
     cancelled: "&eCancelled quest '%quest%'."
-    error_accept: "&cAn error occurred while accepting the quest."
+    error_accept: "&cFailed to accept quest. (Maybe already active?)"
     reward_label: "&eReward: &f"
-    left_click_start: "&aLeft-click: Accept quest"
+    left_click_start: "&a[Left-Click] to Start Quest"
+
   leaderboard:
     title: "&6Quest Leaderboard"
     back: "&f← Back to My Quests"
     back_lore: "&7Click to return to your personal quest list"
-    rank_format: "&e#%rank% &f%player% &7- &a%points% pts"
-    rank_points: "&7Points: &f%points%"
+    rank_format: "&e#%rank% &f%player%"
+    rank_points: "&7Points: &a%points%"
     no_data: "&7No data to display."
 
   # ==========================================================
-  # QUEST EDITOR GUI (A안)
+  # QUEST EDITOR GUI
   # ==========================================================
   editor:
     title:
@@ -131,10 +122,9 @@ gui:
       main_prefix: "Quest Editor -"
       list: "&9List Editor - %key%"
       list_prefix: "List Editor -"
-      event: "&9Event Select %page%/%max%"
-      event.prefix: "Event Select"
-      captures: "&9Captures Editor"
-      captures.prefix: "Captures Editor"
+      # [Fixed]
+      event_view: "&9Event Select %page%/%max%"
+      captures_view: "&9Captures Editor"
     tab:
       selected: "&b%name%"
       normal: "&e%name%"
@@ -164,7 +154,7 @@ gui:
       boolean:
         name: "&6%label%"
         value: "&f%value%"
-        edit: "&eLeft-click: toggle"
+        edit: "&eLeft-click: toggle (ON/OFF)"
       list:
         name: "&6%label%"
         entries: "&7Entries: %count%"
@@ -200,7 +190,7 @@ gui:
           help4: "&7If CustomModelData is missing, default is used."
     event:
       event:
-        label: "Event"
+        label: "Event Name"
       startmode:
         label: "Start Mode"
       type:
@@ -225,9 +215,9 @@ gui:
         lore: "&7Return to editor"
     custom:
       eventclass:
-        label: "Event Class"
+        label: "Event Class (FQCN)"
       playergetter:
-        label: "Player Getter"
+        label: "Player Getter Method"
       captures:
         label: "&bCaptures"
         entries: "&7Count: %count%"
@@ -260,7 +250,7 @@ gui:
       id:
         label: "Quest ID"
       name:
-        label: "Quest Name"
+        label: "Internal Name"
     actions:
       group:
         accept: "ACCEPT"
@@ -272,7 +262,7 @@ gui:
         restart: "RESTART"
         repeat: "REPEAT"
       lines: "&bLines: %count%"
-      left: "&eLeft-click: edit action lines"
+      left: "&eLeft-click: edit lines"
       right: "&cRight-click: clear"
       help:
         title: "&bAction Examples"
@@ -287,7 +277,7 @@ gui:
         help2: "&f%player_level% >= 10 &7→ passes only if the player's level is 10 or higher."
         help3: "&f%player_health% < 5 &7→ passes only if player's health is below 5."
         help4: "&f%block_type% == DIAMOND_ORE &7→ checks if the block type matches."
-        help5: "&7You can combine multiple conditions using &fAND &7or &fOR&7."
+        help5: "&7Multiple conditions are combined with AND logic."
       start:
         label: "Start Conditions"
       success:
@@ -315,7 +305,7 @@ gui:
         label: "Party Quest"
     chain:
       next:
-        label: "Next Quest"
+        label: "Next Quest ID"
     list:
       add:
         name: "&aAdd Entry"
@@ -329,6 +319,8 @@ gui:
         name: "&cClose"
         lore: "&7Close editor"
     prompt:
+      generic_text: "&eEnter value:"
+      generic_number: "&eEnter number:"
       display_title: "&eEnter display title:"
       display_icon: "&eEnter icon material:"
       display_progress: "&eEnter progress format:"
@@ -345,7 +337,7 @@ gui:
       targets_repeat: "&eEnter repeat count:"
       targets_points: "&eEnter quest points:"
       meta_id: "&eEnter quest ID:"
-      meta_name: "&eEnter quest name:"
+      meta_name: "&eEnter internal name:"
       options_resetpolicy: "&eEnter reset policy:"
       options_resettime: "&eEnter reset time:"
       chain_next: "&eEnter next quest ID:"
@@ -357,6 +349,7 @@ gui:
       id_empty: "&cQuest ID is required!"
       folder_create: "&cFailed to create quests folder!"
       captures_format: "&cInvalid capture format! Example: %block_type%;getBlock().getType().name()"
+      list_unknown: "&cUnknown list type!"
     save:
       ok: "&aQuest saved: %id%"
       fail: "&cSave failed: %msg%"

@@ -5,21 +5,23 @@ import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
 import java.lang.reflect.Method;
 import java.util.*;
 
+/**
+ * PartyHook (Optimized)
+ * - MethodHandle을 사용한 고성능 리플렉션
+ * - 불필요한 객체 생성 제거 (Zero-GC 지향)
+ * - 각 플러그인 로직을 독립적인 클래스로 분리
+ */
 public final class PartyHook {
 
     private static PartyAdapter adapter = PartyAdapter.EMPTY;
     private static boolean enabled = false;
 
     private PartyHook() {}
-
-    private static Method mmo_get;
-    private static Method mmo_getParty;
-    private static Method mmo_getOnline;
-
-    private static Object parties_api;
 
     public static void init(Plugin plugin, FileConfiguration cfg) {
         enabled = cfg.getBoolean("party.enabled", true);
@@ -29,39 +31,30 @@ public final class PartyHook {
         }
 
         String provider = cfg.getString("party.provider", "auto");
-        if (provider == null) {
-            provider = "auto";
-        }
+        if (provider == null) provider = "auto";
         provider = provider.toLowerCase(Locale.ROOT);
 
+        // Auto Detect
         if ("auto".equals(provider)) {
-            if (Bukkit.getPluginManager().isPluginEnabled("MythicDungeons")) {
-                provider = "mythicdungeons";
-            } else if (Bukkit.getPluginManager().isPluginEnabled("MMOCore")) {
-                provider = "mmocore";
-            } else if (Bukkit.getPluginManager().isPluginEnabled("Parties")) {
-                provider = "parties";
-            } else {
-                provider = "none";
+            if (Bukkit.getPluginManager().isPluginEnabled("MythicDungeons")) provider = "mythicdungeons";
+            else if (Bukkit.getPluginManager().isPluginEnabled("MMOCore")) provider = "mmocore";
+            else if (Bukkit.getPluginManager().isPluginEnabled("Parties")) provider = "parties";
+            else provider = "none";
+        }
+
+        try {
+            switch (provider) {
+                case "mythicdungeons" -> adapter = new MythicDungeonsAdapter();
+                case "mmocore" -> adapter = new MMOCoreAdapter();
+                case "parties" -> adapter = new PartiesAdapter();
+                default -> adapter = PartyAdapter.EMPTY;
             }
+        } catch (Throwable t) {
+            plugin.getLogger().warning("[QuestEngine] Failed to hook party provider '" + provider + "': " + t.getMessage());
+            adapter = PartyAdapter.EMPTY;
         }
 
-        switch (provider) {
-            case "mythicdungeons":
-                adapter = mythicDungeons();
-                break;
-            case "mmocore":
-                adapter = mmoCore();
-                break;
-            case "parties":
-                adapter = parties();
-                break;
-            default:
-                adapter = PartyAdapter.EMPTY;
-                break;
-        }
-
-        plugin.getLogger().info("[QuestEngine] Party provider " + provider + " available=" + adapter.available());
+        plugin.getLogger().info("[QuestEngine] Party provider: " + provider + " (Active: " + adapter.available() + ")");
     }
 
     public static boolean enabled() {
@@ -72,330 +65,207 @@ public final class PartyHook {
         if (!enabled() || p == null) {
             return p == null ? Collections.emptyList() : Collections.singletonList(p);
         }
-        List<Player> out = new ArrayList<>(8);
-        double limit = radius * (double) radius;
-        for (Player m : adapter.members(p)) {
-            if (m == null || !m.isOnline()) {
-                continue;
-            }
-            if (m.getWorld() != p.getWorld()) {
-                continue;
-            }
-            if (m.getLocation().distanceSquared(p.getLocation()) <= limit) {
+
+        Collection<Player> members = adapter.members(p);
+        // 멤버가 본인 혼자라면 굳이 리스트 새로 만들지 않고 리턴
+        if (members.size() <= 1) return members;
+
+        List<Player> out = new ArrayList<>(members.size());
+        double limit = radius * radius;
+        UUID worldUid = p.getWorld().getUID();
+
+        for (Player m : members) {
+            if (m != null && m.isOnline()
+                    && m.getWorld().getUID().equals(worldUid)
+                    && m.getLocation().distanceSquared(p.getLocation()) <= limit) {
                 out.add(m);
             }
-        }
-        if (out.isEmpty() && p != null) {
-            out.add(p);
         }
         return out;
     }
 
-    private static PartyAdapter mythicDungeons() {
-        try {
-            Class<?> mythicDungeonsCls = Class.forName("net.playavalon.mythicdungeons.MythicDungeons");
-            Class<?> mythicPlayerCls = Class.forName("net.playavalon.mythicdungeons.player.MythicPlayer");
-            Class<?> mythicPartyCls = Class.forName("net.playavalon.mythicdungeons.player.party.partysystem.MythicParty");
+    // ========================================================================
+    // ADAPTERS (Inner Static Classes for Lazy Loading & Clean Structure)
+    // ========================================================================
 
-            Method inst = mythicDungeonsCls.getMethod("inst");
-            Method getMythicPlayer = mythicDungeonsCls.getMethod("getMythicPlayer", org.bukkit.entity.Player.class);
-            Method getMythicParty = mythicPlayerCls.getMethod("getMythicParty");
-            Method getMythicPlayers = mythicPartyCls.getMethod("getMythicPlayers");
-            Method getPlayer = mythicPlayerCls.getMethod("getPlayer");
+    private static class MythicDungeonsAdapter implements PartyAdapter {
+        private final MethodHandle getInst, getMythicPlayer, getMythicParty, getMythicPlayers, getPlayer;
+        private final boolean valid;
 
-            return new PartyAdapter() {
-                @Override
-                public boolean available() {
-                    return true;
+        MythicDungeonsAdapter() throws Throwable {
+            MethodHandles.Lookup lookup = MethodHandles.lookup();
+            Class<?> main = Class.forName("net.playavalon.mythicdungeons.MythicDungeons");
+            Class<?> mPlayer = Class.forName("net.playavalon.mythicdungeons.player.MythicPlayer");
+            Class<?> mParty = Class.forName("net.playavalon.mythicdungeons.player.party.partysystem.MythicParty");
+
+            this.getInst = lookup.unreflect(main.getMethod("inst"));
+            this.getMythicPlayer = lookup.unreflect(main.getMethod("getMythicPlayer", Player.class));
+            this.getMythicParty = lookup.unreflect(mPlayer.getMethod("getMythicParty"));
+            this.getMythicPlayers = lookup.unreflect(mParty.getMethod("getMythicPlayers"));
+            this.getPlayer = lookup.unreflect(mPlayer.getMethod("getPlayer"));
+            this.valid = true;
+        }
+
+        @Override public boolean available() { return valid; }
+
+        @Override
+        public Collection<Player> members(Player p) {
+            if (p == null) return Collections.emptyList();
+            try {
+                Object api = getInst.invoke();
+                Object mp = getMythicPlayer.invoke(api, p);
+                if (mp == null) return Collections.singletonList(p);
+
+                Object party = getMythicParty.invoke(mp);
+                if (party == null) return Collections.singletonList(p);
+
+                Collection<?> players = (Collection<?>) getMythicPlayers.invoke(party);
+                if (players == null || players.isEmpty()) return Collections.singletonList(p);
+
+                List<Player> list = new ArrayList<>(players.size());
+                for (Object wrapper : players) {
+                    Player pl = (Player) getPlayer.invoke(wrapper);
+                    if (pl != null && pl.isOnline()) list.add(pl);
                 }
-
-                @SuppressWarnings("unchecked")
-                @Override
-                public Collection<Player> members(Player p) {
-                    if (p == null) {
-                        return Collections.emptyList();
-                    }
-                    try {
-                        Object api = inst.invoke(null);
-                        Object mythicPlayer = getMythicPlayer.invoke(api, p);
-                        if (mythicPlayer == null) {
-                            return Collections.singletonList(p);
-                        }
-
-                        Object party = getMythicParty.invoke(mythicPlayer);
-                        if (party == null) {
-                            return Collections.singletonList(p);
-                        }
-
-                        Collection<Object> mythicPlayers = (Collection<Object>) getMythicPlayers.invoke(party);
-                        if (mythicPlayers == null || mythicPlayers.isEmpty()) {
-                            return Collections.singletonList(p);
-                        }
-
-                        List<Player> list = new ArrayList<>(mythicPlayers.size());
-                        for (Object mp : mythicPlayers) {
-                            Player pl = (Player) getPlayer.invoke(mp);
-                            if (pl != null && pl.isOnline()) {
-                                list.add(pl);
-                            }
-                        }
-                        return list.isEmpty() ? Collections.singletonList(p) : list;
-                    } catch (Throwable ex) {
-                        ex.printStackTrace();
-                        return Collections.singletonList(p);
-                    }
-                }
-            };
-        } catch (Throwable t) {
-            Bukkit.getLogger().warning("[QuestEngine] MythicDungeons hook failed: " + t.getMessage());
-            return PartyAdapter.EMPTY;
+                return list;
+            } catch (Throwable t) {
+                return Collections.singletonList(p);
+            }
         }
     }
 
-    private static PartyAdapter mmoCore() {
-        try {
-            Class<?> playerDataCls;
-            mmo_get = null;
+    private static class MMOCoreAdapter implements PartyAdapter {
+        private final MethodHandle getPlayerData, getParty, getOnlineMembers, getPlayer;
+        private final boolean valid;
 
+        MMOCoreAdapter() throws Throwable {
+            MethodHandles.Lookup lookup = MethodHandles.lookup();
+            Class<?> dataClass;
+            try { dataClass = Class.forName("net.Indyuce.mmocore.api.player.PlayerData"); }
+            catch (ClassNotFoundException e) { dataClass = Class.forName("net.Indyuce.mmocore.api.player.MMOPlayerData"); }
+
+            MethodHandle getPD;
+            try { getPD = lookup.unreflect(dataClass.getMethod("get", Player.class)); }
+            catch (Throwable t) { getPD = lookup.unreflect(dataClass.getMethod("get", UUID.class)); }
+            this.getPlayerData = getPD;
+
+            this.getParty = lookup.unreflect(dataClass.getMethod("getParty"));
+
+            Class<?> partyClass;
+            try { partyClass = Class.forName("net.Indyuce.mmocore.party.provided.Party"); }
+            catch (ClassNotFoundException e) { partyClass = Class.forName("net.Indyuce.mmocore.party.Party"); }
+
+            this.getOnlineMembers = lookup.unreflect(partyClass.getMethod("getOnlineMembers"));
+
+            // MMOCore 멤버 객체에서 getPlayer() 찾기 (가장 첫 번째 멤버 타입 기준)
+            // 여기서는 런타임에 동적으로 처리하는 대신 안전하게 Object.class 메소드 탐색은 생략하고
+            // 실행 시점에 리플렉션을 최소화하는 방향으로 구성
+            this.getPlayer = null; // 런타임 결정
+            this.valid = true;
+        }
+
+        @Override public boolean available() { return valid; }
+
+        @Override
+        public Collection<Player> members(Player p) {
+            if (p == null) return Collections.emptyList();
             try {
-                playerDataCls = Class.forName("net.Indyuce.mmocore.api.player.PlayerData");
-            } catch (ClassNotFoundException e) {
-                playerDataCls = Class.forName("net.Indyuce.mmocore.api.player.MMOPlayerData");
-            }
+                // MMOCore.get(p) or get(uuid)
+                Object data;
+                try { data = getPlayerData.invoke(p); }
+                catch (Throwable t) { data = getPlayerData.invoke(p.getUniqueId()); }
 
-            try {
-                mmo_get = playerDataCls.getMethod("get", Player.class);
-            } catch (Throwable ignored) {
-            }
-            if (mmo_get == null) {
-                try {
-                    mmo_get = playerDataCls.getMethod("get", UUID.class);
-                } catch (Throwable ignored) {
-                }
-            }
-            if (mmo_get == null) {
-                try {
-                    mmo_get = playerDataCls.getMethod("get", org.bukkit.OfflinePlayer.class);
-                } catch (Throwable ignored) {
-                }
-            }
+                if (data == null) return Collections.singletonList(p);
 
-            if (mmo_get == null) {
-                Bukkit.getLogger().info("[QuestEngine] MMOCore hook skipped, get() not found");
-                return PartyAdapter.EMPTY;
-            }
+                Object party = getParty.invoke(data);
+                if (party == null) return Collections.singletonList(p);
 
-            mmo_getParty = playerDataCls.getMethod("getParty");
+                Collection<?> members = (Collection<?>) getOnlineMembers.invoke(party);
+                if (members == null || members.isEmpty()) return Collections.singletonList(p);
 
-            Class<?> partyCls;
-            try {
-                partyCls = Class.forName("net.Indyuce.mmocore.party.provided.Party");
-            } catch (ClassNotFoundException e) {
-                partyCls = Class.forName("net.Indyuce.mmocore.party.Party");
-            }
-            mmo_getOnline = partyCls.getMethod("getOnlineMembers");
-
-            Bukkit.getLogger().info("[QuestEngine] MMOCore hook successful");
-
-            return new PartyAdapter() {
-                @Override
-                public boolean available() {
-                    return true;
-                }
-
-                @SuppressWarnings("unchecked")
-                @Override
-                public Collection<Player> members(Player p) {
-                    if (p == null) {
-                        return Collections.emptyList();
-                    }
+                List<Player> list = new ArrayList<>(members.size());
+                for (Object m : members) {
+                    // 멤버 객체에서 getPlayer() 호출 (캐싱 없이 단순 invoke가 안전, MMOCore 버전 파편화 때문)
                     try {
-                        Object data = null;
-                        try {
-                            data = mmo_get.invoke(null, p);
-                        } catch (Throwable ignored) {
-                        }
-                        if (data == null) {
-                            try {
-                                data = mmo_get.invoke(null, p.getUniqueId());
-                            } catch (Throwable ignored) {
-                            }
-                        }
-                        if (data == null) {
-                            return Collections.singletonList(p);
-                        }
-
-                        Object party = mmo_getParty.invoke(data);
-                        if (party == null) {
-                            return Collections.singletonList(p);
-                        }
-
-                        Collection<?> members = (Collection<?>) mmo_getOnline.invoke(party);
-                        if (members == null || members.isEmpty()) {
-                            return Collections.singletonList(p);
-                        }
-
-                        List<Player> list = new ArrayList<>(members.size());
-                        for (Object o : members) {
-                            try {
-                                Method getPlayer = o.getClass().getMethod("getPlayer");
-                                Player pl = (Player) getPlayer.invoke(o);
-                                if (pl != null && pl.isOnline()) {
-                                    list.add(pl);
-                                }
-                            } catch (Throwable ignored) {
-                            }
-                        }
-                        return list.isEmpty() ? Collections.singletonList(p) : list;
-                    } catch (Throwable ignored) {
-                        return Collections.singletonList(p);
-                    }
+                        Method mGetPlayer = m.getClass().getMethod("getPlayer");
+                        Player pl = (Player) mGetPlayer.invoke(m);
+                        if (pl != null && pl.isOnline()) list.add(pl);
+                    } catch (Throwable ignored) {}
                 }
-            };
-
-        } catch (Throwable ignored) {
-            Bukkit.getLogger().info("[QuestEngine] MMOCore not compatible, skipping hook");
-            return PartyAdapter.EMPTY;
+                return list;
+            } catch (Throwable t) {
+                return Collections.singletonList(p);
+            }
         }
     }
 
-    private static PartyAdapter parties() {
-        try {
-            Class<?> partiesCls = Class.forName("com.alessiodp.parties.api.Parties");
-            Method getApiMethod = partiesCls.getMethod("getApi");
-            parties_api = getApiMethod.invoke(null);
+    private static class PartiesAdapter implements PartyAdapter {
+        private final Object apiInstance;
+        private final MethodHandle getPartyPlayer, isInParty, getPartyId, getParty, getOnlineMembers, getPlayerUUID;
+        private final boolean valid;
 
-            Class<?> apiCls = Class.forName("com.alessiodp.parties.api.interfaces.PartiesAPI");
-            Class<?> partyPlayerCls = Class.forName("com.alessiodp.parties.api.interfaces.PartyPlayer");
-            Class<?> partyCls = Class.forName("com.alessiodp.parties.api.interfaces.Party");
+        PartiesAdapter() throws Throwable {
+            MethodHandles.Lookup lookup = MethodHandles.lookup();
+            Class<?> main = Class.forName("com.alessiodp.parties.api.Parties");
+            this.apiInstance = main.getMethod("getApi").invoke(null);
 
-            Method api_getPartyPlayer = apiCls.getMethod("getPartyPlayer", UUID.class);
-            Method api_getPartyById = apiCls.getMethod("getParty", UUID.class);
+            Class<?> api = Class.forName("com.alessiodp.parties.api.interfaces.PartiesAPI");
+            Class<?> pp = Class.forName("com.alessiodp.parties.api.interfaces.PartyPlayer");
+            Class<?> party = Class.forName("com.alessiodp.parties.api.interfaces.Party");
 
-            Method pp_isInParty = partyPlayerCls.getMethod("isInParty");
-            Method pp_getPartyId = partyPlayerCls.getMethod("getPartyId");
+            this.getPartyPlayer = lookup.unreflect(api.getMethod("getPartyPlayer", UUID.class));
+            this.getParty = lookup.unreflect(api.getMethod("getParty", UUID.class));
 
-            Method party_getOnlineMembers = partyCls.getMethod("getOnlineMembers");
+            this.isInParty = lookup.unreflect(pp.getMethod("isInParty"));
+            this.getPartyId = lookup.unreflect(pp.getMethod("getPartyId"));
 
-            Method pp_getPlayerUUID = null;
+            this.getOnlineMembers = lookup.unreflect(party.getMethod("getOnlineMembers"));
+
+            MethodHandle uuidGetter = null;
+            try { uuidGetter = lookup.unreflect(pp.getMethod("getPlayerUUID")); } catch (Throwable ignored) {}
+            this.getPlayerUUID = uuidGetter;
+
+            this.valid = (apiInstance != null);
+        }
+
+        @Override public boolean available() { return valid; }
+
+        @Override
+        public Collection<Player> members(Player p) {
+            if (p == null) return Collections.emptyList();
             try {
-                pp_getPlayerUUID = partyPlayerCls.getMethod("getPlayerUUID");
-            } catch (Throwable ignored) {
-            }
+                Object pObj = getPartyPlayer.invoke(apiInstance, p.getUniqueId());
+                if (pObj == null) return Collections.singletonList(p);
 
-            Method pp_getPlayer = null;
-            try {
-                pp_getPlayer = partyPlayerCls.getMethod("getPlayer");
-            } catch (Throwable ignored) {
-            }
+                boolean in = (boolean) isInParty.invoke(pObj);
+                if (!in) return Collections.singletonList(p);
 
-            Method finalPpGetPlayerUUID = pp_getPlayerUUID;
-            Method finalPpGetPlayer = pp_getPlayer;
+                UUID partyId = (UUID) getPartyId.invoke(pObj);
+                if (partyId == null) return Collections.singletonList(p);
 
-            return new PartyAdapter() {
-                @Override
-                public boolean available() {
-                    return parties_api != null;
-                }
+                Object partyObj = getParty.invoke(apiInstance, partyId);
+                if (partyObj == null) return Collections.singletonList(p);
 
-                @SuppressWarnings("unchecked")
-                @Override
-                public Collection<Player> members(Player p) {
-                    if (p == null) {
-                        return Collections.emptyList();
-                    }
-                    try {
-                        Object pp = api_getPartyPlayer.invoke(parties_api, p.getUniqueId());
-                        if (pp == null) {
-                            return Collections.singletonList(p);
-                        }
+                Collection<?> members = (Collection<?>) getOnlineMembers.invoke(partyObj);
+                if (members == null || members.isEmpty()) return Collections.singletonList(p);
 
-                        boolean inParty = false;
+                List<Player> list = new ArrayList<>(members.size());
+                for (Object m : members) {
+                    if (m instanceof UUID) {
+                        Player pl = Bukkit.getPlayer((UUID) m);
+                        if (pl != null) list.add(pl);
+                    } else if (getPlayerUUID != null) {
                         try {
-                            Object v = pp_isInParty.invoke(pp);
-                            if (v instanceof Boolean) {
-                                inParty = (Boolean) v;
-                            }
-                        } catch (Throwable ignored) {
-                        }
-                        if (!inParty) {
-                            return Collections.singletonList(p);
-                        }
-
-                        UUID partyId = (UUID) pp_getPartyId.invoke(pp);
-                        if (partyId == null) {
-                            return Collections.singletonList(p);
-                        }
-
-                        Object party = api_getPartyById.invoke(parties_api, partyId);
-                        if (party == null) {
-                            return Collections.singletonList(p);
-                        }
-
-                        Collection<?> raw = (Collection<?>) party_getOnlineMembers.invoke(party);
-                        if (raw == null || raw.isEmpty()) {
-                            return Collections.singletonList(p);
-                        }
-
-                        List<Player> list = new ArrayList<>(raw.size());
-
-                        Object first = raw.iterator().next();
-
-                        if (first instanceof UUID) {
-                            for (Object o : raw) {
-                                UUID id = (UUID) o;
-                                Player pl = Bukkit.getPlayer(id);
-                                if (pl != null && pl.isOnline()) {
-                                    list.add(pl);
-                                }
-                            }
-                        } else if (partyPlayerCls.isInstance(first)) {
-                            for (Object o : raw) {
-                                UUID id = null;
-
-                                if (finalPpGetPlayerUUID != null) {
-                                    try {
-                                        Object res = finalPpGetPlayerUUID.invoke(o);
-                                        if (res instanceof UUID) {
-                                            id = (UUID) res;
-                                        }
-                                    } catch (Throwable ignored) {
-                                    }
-                                }
-
-                                if (id == null && finalPpGetPlayer != null) {
-                                    try {
-                                        Object obj = finalPpGetPlayer.invoke(o);
-                                        if (obj instanceof Player) {
-                                            Player pl = (Player) obj;
-                                            if (pl.isOnline()) {
-                                                list.add(pl);
-                                            }
-                                            continue;
-                                        }
-                                    } catch (Throwable ignored) {
-                                    }
-                                }
-
-                                if (id != null) {
-                                    Player pl = Bukkit.getPlayer(id);
-                                    if (pl != null && pl.isOnline()) {
-                                        list.add(pl);
-                                    }
-                                }
-                            }
-                        }
-
-                        return list.isEmpty() ? Collections.singletonList(p) : list;
-
-                    } catch (Throwable t) {
-                        return Collections.singletonList(p);
+                            UUID id = (UUID) getPlayerUUID.invoke(m);
+                            Player pl = Bukkit.getPlayer(id);
+                            if (pl != null) list.add(pl);
+                        } catch (Throwable ignored) {}
                     }
                 }
-            };
-        } catch (Throwable t) {
-            Bukkit.getLogger().warning("[QuestEngine] Parties hook failed: " + t.getMessage());
-            return PartyAdapter.EMPTY;
+                return list.isEmpty() ? Collections.singletonList(p) : list;
+            } catch (Throwable t) {
+                return Collections.singletonList(p);
+            }
         }
     }
 }

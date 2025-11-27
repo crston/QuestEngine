@@ -5,54 +5,48 @@ import org.bukkit.Bukkit;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.PluginCommand;
+import org.bukkit.util.StringUtil;
 
-/**
- * QuestEngineCommand
- * - 개발/진단용 명령어
- * - 즉시 응답 중심으로 설계되어 스케줄러, 스트림, 동기화 없음
- */
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.Locale;
+
 public final class QuestEngineCommand extends BaseCommand {
 
-    private static final String PING = "ping";
-    private static final String CACHE = "cache";
-    private static final String PAPI = "papi";
-    private static final String VERSION = "version";
+    private static final List<String> SUBS = Arrays.asList("ping", "cache", "papi", "version");
 
     public QuestEngineCommand(QuestEnginePlugin plugin) {
         super(plugin);
         PluginCommand cmd = plugin.getCommand("questengine");
-        if (cmd != null) cmd.setExecutor(this);
-        else plugin.getLogger().warning("questengine command not found in plugin.yml");
+        if (cmd != null) {
+            cmd.setExecutor(this);
+            cmd.setTabCompleter(this);
+        }
     }
 
     @Override
     public boolean onCommand(CommandSender s, Command c, String l, String[] a) {
         if (a.length == 0) {
-            s.sendMessage("/questengine ping|cache|papi|version");
+            s.sendMessage("§e/questengine ping|cache|papi|version");
             return true;
         }
 
-        String sub = a[0].toLowerCase();
-        // 분기 순서 최적화: 가장 자주 쓰일 가능성이 높은 ping부터
-        if (PING.equals(sub)) {
-            s.sendMessage("§aQuestEngine active");
-            return true;
+        switch (a[0].toLowerCase(Locale.ROOT)) {
+            case "ping" -> s.sendMessage("§aQuestEngine active");
+            case "cache" -> s.sendMessage("§eCached players: §f" + plugin.engine().progress().cacheSize());
+            case "papi" -> s.sendMessage("§ePlaceholderAPI: §f" + (Bukkit.getPluginManager().isPluginEnabled("PlaceholderAPI")));
+            case "version" -> s.sendMessage("§eVersion: §f" + plugin.getDescription().getVersion());
+            default -> s.sendMessage("§e/questengine ping|cache|papi|version");
         }
-        if (CACHE.equals(sub)) {
-            s.sendMessage("§eCached players: §f" + plugin.engine().progress().cacheSize());
-            return true;
-        }
-        if (PAPI.equals(sub)) {
-            boolean has = Bukkit.getPluginManager().getPlugin("PlaceholderAPI") != null;
-            s.sendMessage("§ePlaceholderAPI: §f" + has);
-            return true;
-        }
-        if (VERSION.equals(sub)) {
-            s.sendMessage("§eQuestEngine version §f" + plugin.getDescription().getVersion());
-            return true;
-        }
-
-        s.sendMessage("/questengine ping|cache|papi|version");
         return true;
+    }
+
+    @Override
+    public List<String> onTabComplete(CommandSender sender, Command command, String label, String[] args) {
+        if (args.length == 1) {
+            return StringUtil.copyPartialMatches(args[0], SUBS, new java.util.ArrayList<>(SUBS.size()));
+        }
+        return Collections.emptyList();
     }
 }

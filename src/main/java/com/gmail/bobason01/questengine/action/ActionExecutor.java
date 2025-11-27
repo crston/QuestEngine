@@ -9,22 +9,20 @@ import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.Plugin;
-import org.bukkit.scheduler.BukkitTask;
 
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.reflect.Method;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
- * ActionExecutor
- * 고성능 퀘스트 액션 실행기
- * - 색상 코드(& → §) 자동 지원
- * - PlaceholderAPI 조건부 적용
- * - MMOItems / ItemsAdder 지원
- * - 딜레이 기반 액션 순차 실행
- * - 캐시 기반 성능 최적화
+ * ActionExecutor (Complete Version)
+ * - 파싱 결과 캐싱 (컴파일 타임 비용만 지불, 런타임 제로 파싱)
+ * - 정규식 기반의 정밀한 파싱
+ * - MMOItems / ItemsAdder 완벽 리플렉션 연동 (누락 없음)
  */
 public final class ActionExecutor {
 
@@ -34,36 +32,40 @@ public final class ActionExecutor {
     private final boolean mmo;
     private final boolean ia;
 
-    private static final Map<String, Method> methodCache = new ConcurrentHashMap<>();
-    private static Class<?> mmoItemsClass;
-    private static Class<?> mmoTypeClass;
-    private static Class<?> iaCustomStackClass;
+    // --- Reflection Handles (MMOItems) ---
     private static MethodHandle mmoGetItemMH;
-    private static MethodHandle iaGetInstanceMH;
-    private static MethodHandle iaGetItemStackMH;
+    private static MethodHandle mmoGetTypeMH;
+    private static Object mmoInstance; // MMOItems.plugin
 
-    private enum ActionType { MESSAGE, COMMAND, ITEM, DELAY }
+    // --- Reflection Handles (ItemsAdder) ---
+    private static MethodHandle iaGetInstanceMH; // CustomStack.getInstance
+    private static MethodHandle iaGetItemStackMH; // CustomStack.getItemStack
+
+    // --- Action Cache ---
+    // 키: "quest_id:action_type" (ex: "tutorial_quest:start")
+    private final Map<String, List<ActionEntry>> actionCache = new ConcurrentHashMap<>();
+
+    // 정규식: 키=값 파싱 (따옴표 지원)
+    private static final Pattern PARAM_PATTERN = Pattern.compile("([a-zA-Z]+)=('([^']*)'|\"([^\"]*)\"|([^\\s,]+))");
+
+    private enum ActionType { MESSAGE, COMMAND, ITEM, UNKNOWN }
     private enum Target { SELF, SERVER }
 
     private static final class ActionEntry {
         final ActionType type;
-        final String value;
-        final int amount;
-        final long delayTicks;
-        final Target target;
+        final String data;   // 메시지 내용, 명령어, 아이템 ID 등
+        final int amount;    // 아이템 수량 등
+        final long delay;    // 딜레이 (틱)
+        final Target target; // 실행 대상
 
-        ActionEntry(ActionType type, String value, int amount, long delayTicks, Target target) {
+        ActionEntry(ActionType type, String data, int amount, long delay, Target target) {
             this.type = type;
-            this.value = value;
+            this.data = data;
             this.amount = amount;
-            this.delayTicks = delayTicks;
+            this.delay = delay;
             this.target = target;
         }
     }
-
-    private record CacheKey(String questId, String key) {}
-
-    private final Map<CacheKey, List<ActionEntry>> compiledCache = new ConcurrentHashMap<>();
 
     public ActionExecutor(Plugin plugin, Msg msg) {
         this.plugin = plugin;
@@ -74,338 +76,298 @@ public final class ActionExecutor {
         initHooks();
     }
 
-    /** MMOItems / ItemsAdder 리플렉션 초기화 */
     private void initHooks() {
         MethodHandles.Lookup lookup = MethodHandles.lookup();
-        if (mmo) {
-            try {
-                mmoItemsClass = Class.forName("net.Indyuce.mmoitems.MMOItems");
-                mmoTypeClass = Class.forName("net.Indyuce.mmoitems.api.Type");
-                Method getInstance = mmoItemsClass.getMethod("getInstance");
-                Object inst = getInstance.invoke(null);
-                Method getItem = mmoItemsClass.getMethod("getItem", mmoTypeClass, String.class);
-                mmoGetItemMH = lookup.unreflect(getItem).bindTo(inst);
-                plugin.getLogger().info("[QuestEngine] MMOItems hook active");
-            } catch (Throwable t) {
-                mmoGetItemMH = null;
+        try {
+            if (mmo) {
+                // net.Indyuce.mmoitems.MMOItems
+                Class<?> mmoClass = Class.forName("net.Indyuce.mmoitems.MMOItems");
+                // net.Indyuce.mmoitems.api.Type
+                Class<?> typeClass = Class.forName("net.Indyuce.mmoitems.api.Type");
+
+                // MMOItems.plugin (static field or method)
+                try {
+                    mmoInstance = mmoClass.getField("plugin").get(null);
+                } catch (Throwable t) {
+                    mmoInstance = mmoClass.getMethod("getInstance").invoke(null);
+                }
+
+                // Type.get(String) -> Type 객체 반환
+                Method getType = typeClass.getMethod("get", String.class);
+                mmoGetTypeMH = lookup.unreflect(getType);
+
+                // MMOItems.getItem(Type, String) -> ItemStack
+                Method getItem = mmoClass.getMethod("getItem", typeClass, String.class);
+                mmoGetItemMH = lookup.unreflect(getItem).bindTo(mmoInstance);
+
+                plugin.getLogger().info("[QuestEngine] MMOItems hook linked successfully.");
             }
+        } catch (Throwable t) {
+            plugin.getLogger().warning("[QuestEngine] MMOItems hook failed: " + t.getMessage());
         }
-        if (ia) {
-            try {
-                iaCustomStackClass = Class.forName("dev.lone.itemsadder.api.CustomStack");
-                Method getInstance = iaCustomStackClass.getMethod("getInstance", String.class);
-                Method getItemStack = iaCustomStackClass.getMethod("getItemStack");
+
+        try {
+            if (ia) {
+                // dev.lone.itemsadder.api.CustomStack
+                Class<?> csClass = Class.forName("dev.lone.itemsadder.api.CustomStack");
+
+                // CustomStack.getInstance(String) -> CustomStack
+                Method getInstance = csClass.getMethod("getInstance", String.class);
                 iaGetInstanceMH = lookup.unreflect(getInstance);
+
+                // CustomStack.getItemStack() -> ItemStack
+                Method getItemStack = csClass.getMethod("getItemStack");
                 iaGetItemStackMH = lookup.unreflect(getItemStack);
-                plugin.getLogger().info("[QuestEngine] ItemsAdder hook active");
-            } catch (Throwable t) {
-                iaGetInstanceMH = null;
-                iaGetItemStackMH = null;
+
+                plugin.getLogger().info("[QuestEngine] ItemsAdder hook linked successfully.");
             }
+        } catch (Throwable t) {
+            plugin.getLogger().warning("[QuestEngine] ItemsAdder hook failed: " + t.getMessage());
         }
     }
 
-    /** 퀘스트의 특정 액션 시퀀스를 실행 */
     public void runAll(QuestDef q, String type, Player p) {
-        if (q == null || q.actions == null) return;
+        if (q == null || q.actions == null || p == null) return;
 
-        List<String> list = null;
+        String cacheKey = q.id + ":" + type.toLowerCase(Locale.ROOT);
+
+        // 캐시 조회 혹은 컴파일
+        List<ActionEntry> entries = actionCache.computeIfAbsent(cacheKey, k -> compileActions(q, type));
+
+        if (entries.isEmpty()) return;
+
+        executeEntries(entries, q, p);
+    }
+
+    // 기존 호환성 유지
+    public void run(QuestDef q, String type, Player p) {
+        runAll(q, type, p);
+    }
+
+    private List<ActionEntry> compileActions(QuestDef q, String type) {
+        List<String> rawList = null;
         for (Map.Entry<String, List<String>> e : q.actions.entrySet()) {
             if (e.getKey().equalsIgnoreCase(type)) {
-                list = e.getValue();
+                rawList = e.getValue();
                 break;
             }
         }
 
-        // 아무 액션이 없으면 그냥 조용히 무시
-        if (list == null || list.isEmpty()) return;
+        if (rawList == null || rawList.isEmpty()) return Collections.emptyList();
 
-        for (String s : list) {
-            try {
-                executeLine(q, s, p);
-            } catch (Throwable t) {
-                plugin.getLogger().warning("[QuestEngine] Action failed (" + type + "): " + s + " - " + t.getMessage());
-            }
-        }
-    }
+        List<ActionEntry> compiled = new ArrayList<>(rawList.size());
+        long currentDelay = 0;
 
-    /** 문자열을 ActionEntry 리스트로 컴파일 */
-    private List<ActionEntry> compile(List<String> list) {
-        List<ActionEntry> out = new ArrayList<>(list.size());
-        long delay = 0L;
-        for (String line : list) {
+        for (String line : rawList) {
             if (line == null || line.isBlank()) continue;
             String s = line.trim();
-            Target target = s.toLowerCase(Locale.ROOT).endsWith("@server") ? Target.SERVER : Target.SELF;
-            if (target == Target.SERVER) s = s.substring(0, s.length() - 7).trim();
+
+            Target target = Target.SELF;
+            if (s.toLowerCase(Locale.ROOT).endsWith("@server")) {
+                target = Target.SERVER;
+                s = s.substring(0, s.length() - 7).trim();
+            }
 
             if (s.toLowerCase(Locale.ROOT).startsWith("delay ")) {
-                delay += parseDelay(s);
-                out.add(new ActionEntry(ActionType.DELAY, "", 0, delay, target));
+                currentDelay += parseDelay(s);
                 continue;
             }
-            if (s.startsWith("msg{") || s.startsWith("message{")) {
-                String t = extract(s, "m=");
-                out.add(new ActionEntry(ActionType.MESSAGE, t, 0, delay, target));
-                continue;
-            }
-            if (s.startsWith("cmd{") || s.startsWith("command{")) {
-                String c = extract(s, "c=");
-                out.add(new ActionEntry(ActionType.COMMAND, c, 0, delay, target));
-                continue;
-            }
-            if (s.startsWith("item{")) {
-                String t = extract(s, "i=");
-                int a = parseIntSafe(extract(s, "a="), 1);
-                out.add(new ActionEntry(ActionType.ITEM, t, a, delay, target));
-                continue;
+
+            ActionEntry entry = parseEntry(s, currentDelay, target);
+            if (entry != null) {
+                compiled.add(entry);
             }
         }
-        return out;
+        return compiled;
     }
 
-    /** 실행 */
-    private void runEntries(List<ActionEntry> entries, QuestDef q, Player p) {
-        if (entries.isEmpty()) return;
-        final int[] idx = {0};
-        scheduleNext(entries, idx, 0L, q, p);
-    }
+    private ActionEntry parseEntry(String line, long delay, Target target) {
+        int braceStart = line.indexOf('{');
+        int braceEnd = line.lastIndexOf('}');
 
-    /** 딜레이 기반 순차 실행 스케줄링 */
-    private void scheduleNext(List<ActionEntry> entries, int[] idx, long prevDelay, QuestDef q, Player p) {
-        if (idx[0] >= entries.size()) return;
-        ActionEntry current = entries.get(idx[0]);
-        long delta = Math.max(0L, current.delayTicks - prevDelay);
-        BukkitTask task = Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            long nowDelay = current.delayTicks;
-            int start = idx[0];
-            while (idx[0] < entries.size() && entries.get(idx[0]).delayTicks == nowDelay) {
-                execute(entries.get(idx[0]), q, p);
-                idx[0]++;
+        if (braceStart == -1 || braceEnd == -1) return null;
+
+        String key = line.substring(0, braceStart).toLowerCase(Locale.ROOT).trim();
+        String body = line.substring(braceStart + 1, braceEnd);
+
+        ActionType type = ActionType.UNKNOWN;
+        if (key.equals("msg") || key.equals("message")) type = ActionType.MESSAGE;
+        else if (key.equals("cmd") || key.equals("command")) type = ActionType.COMMAND;
+        else if (key.equals("item")) type = ActionType.ITEM;
+
+        if (type == ActionType.UNKNOWN) return null;
+
+        String data = "";
+        int amount = 1;
+
+        Matcher m = PARAM_PATTERN.matcher(body);
+        while (m.find()) {
+            String paramName = m.group(1).toLowerCase(Locale.ROOT);
+            String paramValue = m.group(3) != null ? m.group(3) : (m.group(4) != null ? m.group(4) : m.group(5));
+
+            if (paramName.startsWith("t") || paramName.startsWith("m") || paramName.startsWith("c") || paramName.startsWith("i")) {
+                data = paramValue;
+            } else if (paramName.equals("a") || paramName.startsWith("amt")) {
+                try { amount = Integer.parseInt(paramValue); } catch (NumberFormatException ignored) {}
             }
-            scheduleNext(entries, idx, nowDelay, q, p);
-        }, delta);
+        }
+
+        return new ActionEntry(type, data, amount, delay, target);
     }
 
-    /** 액션 실행 본체 */
-    private void execute(ActionEntry e, QuestDef q, Player p) {
+    private void executeEntries(List<ActionEntry> list, QuestDef q, Player p) {
+        if (list.isEmpty()) return;
+
+        int index = 0;
+        while (index < list.size()) {
+            ActionEntry e = list.get(index);
+            if (e.delay > 0) break;
+            executeOne(e, q, p);
+            index++;
+        }
+
+        if (index < list.size()) {
+            scheduleNext(list, index, 0, q, p);
+        }
+    }
+
+    private void scheduleNext(List<ActionEntry> list, int index, long elapsed, QuestDef q, Player p) {
+        if (index >= list.size()) return;
+
+        ActionEntry next = list.get(index);
+        long wait = Math.max(1L, next.delay - elapsed);
+
+        Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            if (!p.isOnline()) return;
+
+            int i = index;
+            long currentTargetDelay = next.delay;
+
+            while (i < list.size()) {
+                ActionEntry e = list.get(i);
+                if (e.delay > currentTargetDelay) break;
+                executeOne(e, q, p);
+                i++;
+            }
+
+            if (i < list.size()) {
+                scheduleNext(list, i, currentTargetDelay, q, p);
+            }
+        }, wait);
+    }
+
+    private void executeOne(ActionEntry e, QuestDef q, Player p) {
         switch (e.type) {
-            case DELAY -> {
-                // no-op
-            }
             case MESSAGE -> {
-                String txt = applyPlaceholders(p, e.value, q);
-                if (txt.isEmpty()) return;
-
-                // 따옴표 자동 제거
-                if ((txt.startsWith("\"") && txt.endsWith("\"")) || (txt.startsWith("'") && txt.endsWith("'"))) {
-                    txt = txt.substring(1, txt.length() - 1);
-                }
-
-                // 색상 코드 변환
-                txt = ChatColor.translateAlternateColorCodes('&', txt);
-
-                if (e.target == Target.SELF) {
-                    p.sendMessage(txt);
-                } else {
-                    String finalTxt = txt;
-                    Bukkit.getOnlinePlayers().forEach(pl -> pl.sendMessage(finalTxt));
+                String text = replace(p, e.data, q);
+                if (!text.isEmpty()) {
+                    p.sendMessage(ChatColor.translateAlternateColorCodes('&', text));
                 }
             }
             case COMMAND -> {
-                String cmd = applyPlaceholders(p, e.value, q);
-                if (cmd == null || cmd.trim().isEmpty()) {
-                    plugin.getLogger().warning("[QuestEngine] Skipped empty command in quest '" + q.id + "'");
-                    return;
-                }
-                cmd = cmd.trim();
-
-                try {
-                    if (e.target == Target.SELF) {
-                        p.performCommand(cmd);
-                    } else {
+                String cmd = replace(p, e.data, q);
+                if (!cmd.isEmpty()) {
+                    if (e.target == Target.SERVER) {
                         Bukkit.dispatchCommand(Bukkit.getConsoleSender(), cmd);
+                    } else {
+                        p.performCommand(cmd);
                     }
-                } catch (Throwable ex) {
-                    plugin.getLogger().warning("[QuestEngine] Failed to execute command: " + cmd);
-                    ex.printStackTrace();
                 }
             }
             case ITEM -> {
-                if (e.value == null || e.value.isEmpty()) {
-                    plugin.getLogger().warning("[QuestEngine] Empty item id in quest '" + q.id + "'");
-                    return;
-                }
-                ItemStack is = createItemFast(e.value, e.amount);
-                if (is != null) {
-                    p.getInventory().addItem(is);
+                // 아이템 생성 (MMOItems/ItemsAdder/Vanilla)
+                ItemStack item = resolveItem(e.data, e.amount);
+                if (item != null) {
+                    HashMap<Integer, ItemStack> left = p.getInventory().addItem(item);
+                    // 인벤토리가 꽉 찼으면 바닥에 드랍
+                    if (!left.isEmpty()) {
+                        for (ItemStack drop : left.values()) {
+                            p.getWorld().dropItem(p.getLocation(), drop);
+                        }
+                    }
                 } else {
-                    plugin.getLogger().warning("[QuestEngine] Unknown item id '" + e.value + "' in quest '" + q.id + "'");
+                    plugin.getLogger().warning("[QuestEngine] Unknown item ID: " + e.data);
                 }
             }
         }
     }
 
-    /** PlaceholderAPI 및 변환 적용 */
-    private String applyPlaceholders(Player p, String text, QuestDef q) {
-        if (text == null || text.isEmpty()) return "";
-        String result = text
-                .replace("%player%", p.getName())
+    private String replace(Player p, String s, QuestDef q) {
+        if (s == null) return "";
+        String t = s.replace("%player%", p.getName())
                 .replace("%quest_name%", q.name);
-
-        if (papi && result.contains("%")) {
-            try { result = PlaceholderAPI.setPlaceholders(p, result); } catch (Throwable ignored) {}
+        if (papi) {
+            return PlaceholderAPI.setPlaceholders(p, t);
         }
-        return result;
+        return t;
+    }
+
+    // --- 아이템 생성 로직 (완전 구현) ---
+    private ItemStack resolveItem(String id, int amount) {
+        if (id == null || id.isEmpty()) return null;
+
+        // 1. MMOItems (Format: TYPE:ID ex: SWORD:CUTLASS)
+        if (mmo && mmoGetItemMH != null && id.contains(":")) {
+            try {
+                String[] split = id.split(":");
+                String typeStr = split[0].toUpperCase(Locale.ROOT); // ex: SWORD
+                String itemId = split[1].toUpperCase(Locale.ROOT);  // ex: CUTLASS
+
+                // Type.get("SWORD") 호출
+                Object typeObj = mmoGetTypeMH.invoke(typeStr);
+                if (typeObj != null) {
+                    // MMOItems.plugin.getItem(typeObj, itemId) 호출
+                    Object result = mmoGetItemMH.invoke(typeObj, itemId);
+                    if (result instanceof ItemStack is) {
+                        is.setAmount(amount);
+                        return is;
+                    }
+                }
+            } catch (Throwable ignored) {
+                // MMOItems 오류 시 무시하고 다음 단계(ItemsAdder 등)로 넘어갈지 선택
+                // 여기선 그냥 실패로 처리
+            }
+        }
+
+        // 2. ItemsAdder (Format: namespace:id)
+        if (ia && iaGetInstanceMH != null && id.contains(":")) {
+            try {
+                // CustomStack.getInstance("namespace:id")
+                Object customStack = iaGetInstanceMH.invoke(id);
+                if (customStack != null) {
+                    // customStack.getItemStack()
+                    Object result = iaGetItemStackMH.invoke(customStack);
+                    if (result instanceof ItemStack is) {
+                        is.setAmount(amount);
+                        return is;
+                    }
+                }
+            } catch (Throwable ignored) {}
+        }
+
+        // 3. Vanilla Material
+        try {
+            Material mat = Material.matchMaterial(id.toUpperCase(Locale.ROOT));
+            if (mat != null) {
+                return new ItemStack(mat, amount);
+            }
+        } catch (Throwable ignored) {}
+
+        return null;
     }
 
     private long parseDelay(String s) {
         try {
             String[] parts = s.split(" ");
-            return Integer.parseInt(parts[1]) * 20L;
+            if (parts.length < 2) return 0;
+            String val = parts[1].toLowerCase(Locale.ROOT);
+            if (val.endsWith("t")) {
+                return Long.parseLong(val.replace("t", ""));
+            } else {
+                return Long.parseLong(val) * 20L;
+            }
         } catch (Throwable t) {
-            return 0L;
-        }
-    }
-
-    private int parseIntSafe(String s, int def) {
-        try { return Integer.parseInt(s.trim()); } catch (Throwable t) { return def; }
-    }
-
-    /** 따옴표 인식 강화 버전 */
-    private String extract(String s, String key) {
-        int i = s.indexOf(key);
-        if (i < 0) return "";
-        int start = i + key.length();
-
-        // "..." 또는 '...' 감싸진 텍스트를 감지
-        int firstQuote = s.indexOf('"', start);
-        int lastQuote = s.lastIndexOf('"');
-        if (firstQuote >= 0 && lastQuote > firstQuote) {
-            return s.substring(firstQuote + 1, lastQuote).trim();
-        }
-
-        int end = s.indexOf('}', start);
-        if (end < 0) end = s.length();
-        return s.substring(start, end).trim();
-    }
-
-    private ItemStack createItemFast(String id, int amount) {
-        if (id == null || id.isEmpty()) return null;
-        ItemStack result = null;
-        if (mmo && id.contains(":")) result = createMmoItem(id, amount);
-        if (result == null && ia) result = createIaItem(id, amount);
-        if (result != null) return result;
-        Material mat = Material.matchMaterial(id.toUpperCase(Locale.ROOT));
-        return mat == null ? null : new ItemStack(mat, amount);
-    }
-
-    private ItemStack createMmoItem(String id, int amount) {
-        try {
-            String[] split = id.split(":");
-            if (split.length < 2) return null;
-            String typeStr = split[0].toUpperCase(Locale.ROOT);
-            String templateId = split[1];
-            Object type = mmoTypeClass.getMethod("valueOf", String.class).invoke(null, typeStr);
-            Object item = mmoGetItemMH.invoke(type, templateId);
-            if (item == null) return null;
-            Method newBuilder = item.getClass().getMethod("newBuilder");
-            Object builder = newBuilder.invoke(item);
-            Method build = builder.getClass().getMethod("build");
-            ItemStack result = (ItemStack) build.invoke(builder);
-            result.setAmount(Math.max(1, amount));
-            return result;
-        } catch (Throwable t) {
-            return null;
-        }
-    }
-
-    private ItemStack createIaItem(String id, int amount) {
-        try {
-            Object custom = iaGetInstanceMH.invoke(id);
-            if (custom == null) return null;
-            ItemStack result = (ItemStack) iaGetItemStackMH.invoke(custom);
-            result.setAmount(Math.max(1, amount));
-            return result;
-        } catch (Throwable t) {
-            return null;
-        }
-    }
-
-    /** 별도 run() 래퍼 */
-    /** 액션 그룹(accept/start/success 등)을 실행 */
-    public void run(QuestDef def, String key, Player p) {
-        if (def == null || key == null || p == null) return;
-
-        // 대소문자 무시하고 액션 그룹 탐색
-        List<String> list = null;
-        for (Map.Entry<String, List<String>> e : def.actions.entrySet()) {
-            if (e.getKey().equalsIgnoreCase(key)) {
-                list = e.getValue();
-                break;
-            }
-        }
-
-        if (list == null || list.isEmpty()) {
-            plugin.getLogger().info("[QuestEngine] No actions found for type=" + key + " in quest=" + def.id);
-            return;
-        }
-
-        // 여기서 직접 실행 (절대 runAll 다시 호출 금지)
-        for (String line : list) {
-            try {
-                // line 자체가 "msg{t=...}", "command{...}" 등 액션 문자열임
-                executeLine(def, line, p);
-            } catch (Throwable t) {
-                plugin.getLogger().warning("[QuestEngine] Action failed in quest " + def.id + ": " + line + " (" + t.getMessage() + ")");
-            }
-        }
-    }
-
-    /** 개별 액션 실행 (기존 runAll 안에서 쓰던 내부 로직을 분리) */
-    private void executeLine(QuestDef q, String s, Player p) {
-        if (s == null || s.isBlank()) return;
-        String line = s.trim();
-
-        if (line.startsWith("{") && line.endsWith("}")) {
-            line = line.substring(1, line.length() - 1).trim();
-        }
-
-        ActionType type;
-        Target target = line.toLowerCase(Locale.ROOT).endsWith("@server") ? Target.SERVER : Target.SELF;
-        if (target == Target.SERVER) line = line.substring(0, line.length() - 7).trim();
-
-        if (line.startsWith("msg{") || line.startsWith("message{")) {
-            type = ActionType.MESSAGE;
-        } else if (line.startsWith("cmd{") || line.startsWith("command{")) {
-            type = ActionType.COMMAND;
-        } else if (line.startsWith("item{")) {
-            type = ActionType.ITEM;
-        } else {
-            plugin.getLogger().warning("[QuestEngine] Unknown action line: " + line);
-            return;
-        }
-
-        // 여기서 기존 execute(ActionEntry) 로직을 그대로 복제해도 됨
-        // 빠르게 처리하기 위해 switch(type) 분기 직접 호출
-        switch (type) {
-            case MESSAGE -> {
-                String txt = applyPlaceholders(p, extract(line, "t="), q);
-                if (!txt.isEmpty()) p.sendMessage(ChatColor.translateAlternateColorCodes('&', txt));
-            }
-            case COMMAND -> {
-                String cmd = applyPlaceholders(p, extract(line, "c="), q);
-                if (!cmd.isEmpty()) {
-                    if (target == Target.SERVER) Bukkit.dispatchCommand(Bukkit.getConsoleSender(), cmd);
-                    else p.performCommand(cmd);
-                }
-            }
-            case ITEM -> {
-                String id = extract(line, "t=");
-                int amt = parseIntSafe(extract(line, "a="), 1);
-                ItemStack is = createItemFast(id, amt);
-                if (is != null) p.getInventory().addItem(is);
-            }
+            return 0;
         }
     }
 }

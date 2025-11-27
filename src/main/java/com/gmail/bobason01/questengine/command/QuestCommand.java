@@ -3,30 +3,19 @@ package com.gmail.bobason01.questengine.command;
 import com.gmail.bobason01.questengine.QuestEnginePlugin;
 import com.gmail.bobason01.questengine.quest.QuestDef;
 import org.bukkit.Bukkit;
-import org.bukkit.command.*;
+import org.bukkit.command.Command;
+import org.bukkit.command.CommandSender;
+import org.bukkit.command.PluginCommand;
 import org.bukkit.entity.Player;
+import org.bukkit.util.StringUtil;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 
-/**
- * QuestCommand
- * - /quest 명령어로 GUI 바로 열기
- * - list/public/top GUI 포함
- * - 검색어 초기화 기능 추가
- */
-public final class QuestCommand extends BaseCommand implements TabCompleter {
-
-    private static final String SUB_START = "start";
-    private static final String SUB_CANCEL = "cancel";
-    private static final String SUB_LIST = "list";
-    private static final String SUB_PUBLIC = "public";
-    private static final String SUB_TOP = "top";
-    private static final String SUB_ABANDONALL = "abandonall";
-    private static final String SUB_POINTS = "points";
+public final class QuestCommand extends BaseCommand {
 
     private static final List<String> SUBS = Arrays.asList(
-            SUB_START, SUB_CANCEL, SUB_LIST, SUB_PUBLIC, SUB_TOP, SUB_ABANDONALL, SUB_POINTS
+            "start", "cancel", "list", "public", "top", "abandonall", "points"
     );
 
     public QuestCommand(QuestEnginePlugin plugin) {
@@ -35,8 +24,6 @@ public final class QuestCommand extends BaseCommand implements TabCompleter {
         if (cmd != null) {
             cmd.setExecutor(this);
             cmd.setTabCompleter(this);
-        } else {
-            plugin.getLogger().warning("[QuestCommand] 'quest' command not found in plugin.yml");
         }
     }
 
@@ -47,11 +34,8 @@ public final class QuestCommand extends BaseCommand implements TabCompleter {
             return true;
         }
 
-        // =============================================================
-        // 기본: /quest > GUI 바로 열기 (검색어 초기화)
-        // =============================================================
         if (a.length == 0) {
-            plugin.gui().putSession(p, "list_search", ""); // 검색 초기화
+            plugin.gui().putSession(p, "list_search", "");
             plugin.gui().openList(p);
             return true;
         }
@@ -59,111 +43,56 @@ public final class QuestCommand extends BaseCommand implements TabCompleter {
         String sub = a[0].toLowerCase(Locale.ROOT);
 
         switch (sub) {
-            case SUB_START -> {
-                if (a.length < 2) {
-                    p.sendMessage(plugin.msg().get("invalid_args"));
-                    return true;
-                }
+            case "start" -> {
+                if (a.length < 2) return msg(p, "invalid_args");
                 QuestDef q = plugin.engine().quests().get(a[1]);
-                if (q == null) {
-                    p.sendMessage(plugin.msg().get("list_empty"));
-                    return true;
-                }
+                if (q == null) return msg(p, "list_empty");
                 plugin.engine().startQuest(p, q);
-                return true;
             }
-
-            case SUB_CANCEL -> {
-                if (a.length < 2) {
-                    p.sendMessage(plugin.msg().get("invalid_args"));
-                    return true;
-                }
+            case "cancel" -> {
+                if (a.length < 2) return msg(p, "invalid_args");
                 QuestDef q = plugin.engine().quests().get(a[1]);
-                if (q == null) {
-                    p.sendMessage(plugin.msg().get("list_empty"));
-                    return true;
-                }
+                if (q == null) return msg(p, "list_empty");
                 plugin.engine().cancelQuest(p, q);
-                return true;
             }
-
-            // =============================================================
-            // /quest list > 목록 GUI (검색 초기화)
-            // =============================================================
-            case SUB_LIST -> {
-                plugin.gui().putSession(p, "list_search", ""); // 검색 초기화
+            case "list" -> {
+                plugin.gui().putSession(p, "list_search", "");
                 plugin.gui().openList(p);
-                return true;
             }
-
-            // =============================================================
-            // /quest public > 공개 퀘스트 GUI
-            // =============================================================
-            case SUB_PUBLIC -> {
-                plugin.gui().openPublic(p);
-                return true;
-            }
-
-            // =============================================================
-            // /quest top > 리더보드 GUI
-            // =============================================================
-            case SUB_TOP -> {
-                plugin.gui().openLeaderboard(p);
-                return true;
-            }
-
-            case SUB_ABANDONALL -> {
+            case "public" -> plugin.gui().openPublic(p);
+            case "top" -> plugin.gui().openLeaderboard(p);
+            case "abandonall" -> {
                 plugin.engine().abandonAll(p);
                 p.sendMessage(plugin.msg().get("abandon_all_done"));
-                return true;
             }
-
-            case SUB_POINTS -> {
-                showPoints(p);
-                return true;
-            }
-
-            default -> {
-                p.sendMessage(plugin.msg().get("invalid_args"));
-                return true;
-            }
+            case "points" -> showPoints(p);
+            default -> msg(p, "invalid_args");
         }
+        return true;
+    }
+
+    private boolean msg(Player p, String key) {
+        p.sendMessage(plugin.msg().get(key));
+        return true;
     }
 
     private void showPoints(Player p) {
-        CompletableFuture
-                .supplyAsync(() -> plugin.engine().progress().getPoints(p.getUniqueId()), plugin.engine().asyncPool())
-                .thenAccept(points -> Bukkit.getScheduler().runTask(plugin, () -> {
-                    String msg = plugin.msg().get("list_header") + "§f "
-                            + plugin.msg().get("list.points").replace("%points%", String.valueOf(points));
-                    p.sendMessage(msg);
-                }));
+        CompletableFuture.supplyAsync(() -> plugin.engine().progress().getPoints(p.getUniqueId()), plugin.engine().asyncPool())
+                .thenAccept(points -> Bukkit.getScheduler().runTask(plugin, () ->
+                        p.sendMessage(plugin.msg().get("list_header") + "§f " +
+                                plugin.msg().get("list.points").replace("%points%", String.valueOf(points)))
+                ));
     }
 
     @Override
     public List<String> onTabComplete(CommandSender s, Command c, String l, String[] a) {
-        int len = a.length;
-        if (len == 0) return Collections.emptyList();
-
-        if (len == 1) {
-            String prefix = a[0].toLowerCase(Locale.ROOT);
-            List<String> out = new ArrayList<>(SUBS.size());
-            for (String sub : SUBS) {
-                if (sub.startsWith(prefix)) out.add(sub);
-            }
-            return out;
+        if (a.length == 1) {
+            return StringUtil.copyPartialMatches(a[0], SUBS, new ArrayList<>(SUBS.size()));
         }
-
-        if (len == 2 && (SUB_START.equalsIgnoreCase(a[0]) || SUB_CANCEL.equalsIgnoreCase(a[0]))) {
-            String prefix = a[1].toLowerCase(Locale.ROOT);
+        if (a.length == 2 && ("start".equalsIgnoreCase(a[0]) || "cancel".equalsIgnoreCase(a[0]))) {
             Collection<String> ids = plugin.engine().quests().ids();
-            List<String> out = new ArrayList<>(Math.max(8, ids.size()));
-            for (String id : ids) {
-                if (id != null && id.toLowerCase(Locale.ROOT).startsWith(prefix)) out.add(id);
-            }
-            return out;
+            return StringUtil.copyPartialMatches(a[1], ids, new ArrayList<>(ids.size()));
         }
-
         return Collections.emptyList();
     }
 }

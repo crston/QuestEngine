@@ -1,52 +1,127 @@
-# ==============================================================
-# QuestEngine - Main Configuration
-# Extreme Performance & Modular Design
-# ==============================================================
+# ==========================================================
+# QuestEngine Configuration
+# ==========================================================
 
-performance:
-  condition-cache-ttl-ms: 300
-  event-dedup-window-ms: 10
+# ----------------------------------------------------------
+# [1] Data Storage Settings
+# ----------------------------------------------------------
+storage:
+  # Select data storage method:
+  # - file   : Binary file storage (Fastest, Recommended)
+  # - yaml   : Text file storage (Human-readable, Slower)
+  # - sqlite : Local SQLite database (Single file DB)
+  # - mysql  : External MySQL database (For multi-server networks)
+  mode: file
 
+  # SQLite settings (used when mode: sqlite)
+  sqlite:
+    file: "data/questengine.db"
+
+  # MySQL settings (used when mode: mysql)
+  mysql:
+    host: "localhost"
+    port: 3306
+    database: "questengine"
+    user: "root"
+    password: ""
+
+# ----------------------------------------------------------
+# [2] Quest File Settings
+# ----------------------------------------------------------
+quests:
+  # The folder name where quest files (.yml) are located
+  # This path is relative to the plugin's data folder.
+  folder: "quests"
+
+# ----------------------------------------------------------
+# [3] Reset Settings
+# ----------------------------------------------------------
 reset:
+  # Default reset time for daily quests (DAILY)
+  # Format: 24-hour HH:MM
   default-time: "04:00"
 
-storage:
-  type: SQLITE
-  file:
-    folder: data/playerdata
-  yaml:
-    folder: data/playerdata_yaml
-  sqlite:
-    file: data/questengine.db
-  mysql:
-    host: localhost
-    port: 3306
-    database: questengine
-    user: root
-    password: ""
-    options:
-      useSSL: false
-      characterEncoding: utf8
-      serverTimezone: UTC
-      rewriteBatchedStatements: true
-
-quests:
-  folder: quests
-
+# ----------------------------------------------------------
+# [4] Party System Hooks
+# ----------------------------------------------------------
 party:
-  enabled: false
+  # Enable party integration
+  enabled: true
+
+  # Party plugin provider detection:
+  # - auto           : Automatically detect installed party plugins
+  # - mythicdungeons : Use MythicDungeons parties
+  # - mmocore        : Use MMOCore parties
+  # - parties        : Use AlessioDP's Parties plugin
+  # - none           : Disable party hook
   provider: auto
 
-debug:
-  enabled: false
-  log-events: false
-  log-conditions: false
-  log-actions: false
+# ----------------------------------------------------------
+# [5] Performance Tuning
+# ※ Advanced settings to reduce server lag.
+# ----------------------------------------------------------
+performance:
+  # Cache duration for condition check results (in milliseconds)
+  # - Lower values mean faster updates but higher CPU usage.
+  condition-cache-ttl-ms: 300
 
-# --------------------------------------------------------------
-# GUI Settings
-# --------------------------------------------------------------
+  # Time window to prevent duplicate events (in milliseconds)
+  # - Ignores events occurring multiple times within the same tick.
+  event-dedup-window-ms: 10
+
+# ==========================================================
+# [6] GUI Settings (Menus)
+# ==========================================================
 gui:
+  # Sound Effects (Use Bukkit Sound Enum names)
+  # You can list multiple sounds to play simultaneously.
+  sounds:
+    open:
+      - "UI_TOAST_IN"
+    click:
+      - "UI_BUTTON_CLICK"
+    page:
+      - "ITEM_BOOK_PAGE_TURN"
+    success:
+      - "ENTITY_PLAYER_LEVELUP"
+    cancel:
+      - "ENTITY_VILLAGER_NO"
+    error:
+      - "BLOCK_ANVIL_LAND"
+
+  # --------------------------------------------------------
+  # Common Icon Settings (Material and CustomModelData)
+  # Set 'model: -1' to use the default item texture.
+  # --------------------------------------------------------
+  icons:
+    search:
+      material: COMPASS
+      model: -1
+    leaderboard:
+      material: GOLD_INGOT
+      model: -1
+    public:
+      material: BOOK
+      model: -1
+    sort:
+      material: HOPPER
+      model: -1
+    prev:
+      material: ARROW
+      model: -1
+    next:
+      material: ARROW
+      model: -1
+    page_input:
+      material: PAPER
+      model: -1
+    back:
+      material: OAK_DOOR
+      model: -1
+
+  # --------------------------------------------------------
+  # My Quest List Menu (/quest list)
+  # --------------------------------------------------------
   list:
     buttons:
       search: true
@@ -57,79 +132,37 @@ gui:
       next: true
       page_input: true
 
-  confirm:
-    buttons:
-      yes: true
-      no: true
-
+  # --------------------------------------------------------
+  # Public Quest Board (/quest public)
+  # --------------------------------------------------------
   public:
     buttons:
       back: true
       search: true
       prev: true
       next: true
+    # Board-specific icons (Can differ from common icons)
     icons:
       back:
-        material: ARROW
-        model: 111
+        material: OAK_DOOR
+        model: -1
       search:
-        material: OAK_SIGN
-        model: 112
+        material: COMPASS
+        model: -1
       prev:
         material: ARROW
-        model: 113
+        model: -1
       next:
         material: ARROW
-        model: 114
+        model: -1
 
+  # --------------------------------------------------------
+  # Leaderboard Menu (/quest top)
+  # --------------------------------------------------------
   leaderboard:
     buttons:
       back: true
     icons:
       back:
-        material: ARROW
-        model: 121
-
-  icons:
-    search:
-      material: OAK_SIGN
-      model: 101
-    leaderboard:
-      material: PLAYER_HEAD
-      model: 102
-    public:
-      material: BOOK
-      model: 103
-    sort:
-      material: COMPARATOR
-      model: 104
-    prev:
-      material: ARROW
-      model: 105
-    next:
-      material: ARROW
-      model: 106
-    page_input:
-      material: NAME_TAG
-      model: 107
-    yes:
-      material: LIME_WOOL
-      model: 201
-    no:
-      material: RED_WOOL
-      model: 202
-
-  sounds:
-    open:
-      - "custom.menu.open"
-    click:
-      - "custom.ui.click"
-      - "UI_BUTTON_CLICK"
-    page:
-      - "custom.ui.page"
-    cancel:
-      - "custom.quest.cancel"
-    success:
-      - "custom.quest.success"
-    error:
-      - "custom.ui.error"
+        material: OAK_DOOR
+        model: -1

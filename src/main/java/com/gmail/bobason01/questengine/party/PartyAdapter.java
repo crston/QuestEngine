@@ -7,40 +7,28 @@ public interface PartyAdapter {
 
     boolean available();
 
-    default boolean isInParty(final Player player) { return false; }
+    default boolean isInParty(final Player player) {
+        // members가 본인 외에 더 있으면 파티라고 간주
+        return members(player).size() > 1;
+    }
 
     Collection<Player> members(final Player player);
 
-    default Collection<Player> getOnlineMembers(final Player player) { return members(player); }
+    default Collection<Player> getOnlineMembers(final Player player) {
+        return members(player);
+    }
 
+    // 상태를 가지지 않는 불변 객체 사용 (Thread-Safe)
     PartyAdapter EMPTY = new PartyAdapter() {
-        private final List<Player> singleton = new ArrayList<>(1);
-
         @Override
         public boolean available() { return false; }
 
         @Override
         public Collection<Player> members(final Player p) {
-            singleton.clear();
-            if (p != null) {
-                singleton.add(p);
-            }
-            return singleton;
+            return p == null ? Collections.emptyList() : Collections.singletonList(p);
         }
 
         @Override
-        public Collection<Player> getOnlineMembers(final Player p) {
-            singleton.clear();
-            if (p != null) {
-                singleton.add(p);
-            }
-            return singleton;
-        }
-
-        @Override
-        public boolean isInParty(final Player player) {
-            return false;
-        }
+        public boolean isInParty(final Player player) { return false; }
     };
 }
-
