@@ -8,6 +8,7 @@ import com.gmail.bobason01.questengine.quest.CustomEventData;
 import com.gmail.bobason01.questengine.quest.QuestDef;
 import com.gmail.bobason01.questengine.quest.QuestRepository;
 import com.gmail.bobason01.questengine.util.Msg;
+import io.lumine.mythic.bukkit.events.MythicMobDeathEvent; // MythicMobs 이벤트 임포트 추가
 import me.clip.placeholderapi.PlaceholderAPI;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
@@ -771,6 +772,14 @@ public final class Engine {
             if (!(event instanceof EntityDeathEvent)) return false;
             String type = ((EntityDeathEvent) event).getEntity().getType().name();
             return checkTokens(type, target);
+        });
+
+        matchers.put("mythicmobs_entity_kill", (player, event, target) -> {
+            if (event instanceof MythicMobDeathEvent) {
+                String id = ((MythicMobDeathEvent) event).getMobType().getInternalName();
+                return checkTokens(id, target);
+            }
+            return false;
         });
 
         matchers.put("player_command", (player, event, target) -> {
