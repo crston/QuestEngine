@@ -31,9 +31,10 @@ import java.util.jar.JarFile;
 
 /**
  * QuestEnginePlugin
- * - ProgressRepository API 변경 대응 (preload -> of)
+ * - ProgressRepository API 변경 대응 of 사용
  * - EventDispatcher 통합으로 인한 중복 리스너 등록 제거
  * - 스레드 풀 및 리소스 정리 최적화
+ * - 퀘스트 폴더 존재 여부에 따른 초기화 로직 변경
  */
 public final class QuestEnginePlugin extends JavaPlugin {
 
@@ -56,24 +57,32 @@ public final class QuestEnginePlugin extends JavaPlugin {
         msg = new Msg(this);
 
         // 2. Quest Folder Setup
+        // 폴더가 존재하지 않는 경우에만 생성하고 기본 퀘스트 파일을 추출합니다
+        // 이미 폴더가 존재하면 아무 작업도 하지 않습니다
         File questDir = new File(getDataFolder(), getConfig().getString("quests.folder", "quests"));
-        if (!questDir.exists() && !questDir.mkdirs()) {
-            getLogger().warning("[QuestEngine] Failed to create quest folder: " + questDir.getAbsolutePath());
-        }
 
-        try {
-            copyDefaultQuests(questDir);
-        } catch (Exception e) {
-            getLogger().warning("[QuestEngine] Failed to extract default quests: " + e.getMessage());
+        if (!questDir.exists()) {
+            if (questDir.mkdirs()) {
+                getLogger().info("[QuestEngine] Quests folder created. Extracting defaults...");
+                try {
+                    copyDefaultQuests(questDir);
+                } catch (Exception e) {
+                    getLogger().warning("[QuestEngine] Failed to extract default quests: " + e.getMessage());
+                }
+            } else {
+                getLogger().warning("[QuestEngine] Failed to create quest folder: " + questDir.getAbsolutePath());
+            }
+        } else {
+            getLogger().info("[QuestEngine] Quests folder found. Skipping default generation.");
         }
 
         // 3. Core Components Init
         quests = new QuestRepository(this, questDir);
         progress = new ProgressRepository(this);
 
-        // 4. Thread Pool (CPU Core 기반 최적화)
+        // 4. Thread Pool CPU Core 기반 최적화
         asyncPool = Executors.newFixedThreadPool(
-                Math.max(2, Runtime.getRuntime().availableProcessors()), // 코어 수만큼 할당
+                Math.max(2, Runtime.getRuntime().availableProcessors()),
                 r -> {
                     Thread t = new Thread(r, "QuestEngine-AsyncPool");
                     t.setDaemon(true);
@@ -86,7 +95,7 @@ public final class QuestEnginePlugin extends JavaPlugin {
         // 5. Preload Online Players
         for (Player p : Bukkit.getOnlinePlayers()) {
             try {
-                // preload() -> of() : 데이터를 로드하고 캐시에 올립니다.
+                // preload 대신 of 메서드 사용 데이터 로드 및 캐싱
                 progress.of(p.getUniqueId(), p.getName());
                 getLogger().info("[QuestEngine] Cached progress for " + p.getName());
             } catch (Throwable t) {
@@ -94,9 +103,8 @@ public final class QuestEnginePlugin extends JavaPlugin {
             }
         }
 
-        // 6. Event Listeners (지연 등록)
-        // 별도의 Bridge 클래스(CitizensNpcInteractBridge 등) 등록 제거
-        // 이유: EventDispatcher 내부에서 이미 조건부로 리스너를 등록하고 처리하므로 중복 등록 방지
+        // 6. Event Listeners 지연 등록
+        // 별도의 Bridge 클래스 등록 제거 EventDispatcher 내부 처리
         Bukkit.getScheduler().runTask(this, () -> {
             try {
                 new EventDispatcher(this, engine);
@@ -200,7 +208,9 @@ public final class QuestEnginePlugin extends JavaPlugin {
                 if (fileName.isEmpty()) continue; // 폴더 자체인 경우 스킵
 
                 File outFile = new File(questDir, fileName);
-                if (outFile.exists()) continue; // 이미 존재하면 덮어쓰지 않음
+                // 이미 존재하면 덮어쓰지 않지만 상위 로직에서 폴더가 없을 때만 호출하므로
+                // 사실상 새 폴더에 파일들을 생성하는 역할만 수행하게 됩니다
+                if (outFile.exists()) continue;
 
                 try (InputStream in = jar.getInputStream(entry);
                      FileOutputStream out = new FileOutputStream(outFile)) {

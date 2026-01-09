@@ -5,11 +5,6 @@ import com.gmail.bobason01.questengine.quest.QuestDef;
 
 import java.util.*;
 
-/**
- * QuestEditorDraft (Optimized)
- * - 컬렉션 초기 용량 지정
- * - 불필요한 객체 복사 제거
- */
 public final class QuestEditorDraft {
 
     // Metadata
@@ -24,11 +19,14 @@ public final class QuestEditorDraft {
     public boolean party = false;
     public QuestDef.StartMode startMode = QuestDef.StartMode.NONE;
 
-    // Lists (초기 용량 4로 최적화, 대부분 적음)
+    // Lists
     public final List<String> targets = new ArrayList<>(4);
     public final List<String> condStart = new ArrayList<>(4);
     public final List<String> condSuccess = new ArrayList<>(4);
     public final List<String> condFail = new ArrayList<>(4);
+
+    // [NEW] Prerequisites
+    public final List<String> requiredQuests = new ArrayList<>(4);
 
     // Reset
     public String resetPolicy = "";
@@ -57,15 +55,14 @@ public final class QuestEditorDraft {
     public final Map<String, List<String>> actions = new LinkedHashMap<>(8);
 
     public QuestDef buildQuestDef() {
-        // 불변 리스트 복사
         List<String> tCopy = List.copyOf(targets);
         List<String> cStart = List.copyOf(condStart);
         List<String> cSucc = List.copyOf(condSuccess);
         List<String> cFail = List.copyOf(condFail);
+        List<String> reqQuests = List.copyOf(requiredQuests); // [NEW]
 
         QuestDef.Reset reset = new QuestDef.Reset(resetPolicy, resetTime);
 
-        // Display Map 최적화
         Map<String, Object> dMap = new LinkedHashMap<>(8);
         dMap.put("title", displayTitle);
         if (!displayDescription.isEmpty()) dMap.put("description", List.copyOf(displayDescription));
@@ -79,7 +76,6 @@ public final class QuestEditorDraft {
 
         QuestDef.Display display = new QuestDef.Display(dMap);
 
-        // Custom Event
         CustomEventData custom = null;
         if (customEventClass != null && !customEventClass.isEmpty()) {
             custom = new CustomEventData(
@@ -89,7 +85,6 @@ public final class QuestEditorDraft {
             );
         }
 
-        // Actions (Deep Copy)
         Map<String, List<String>> actionsCopy;
         if (actions.isEmpty()) {
             actionsCopy = Collections.emptyMap();
@@ -104,7 +99,7 @@ public final class QuestEditorDraft {
 
         return new QuestDef(
                 id, name, event, tCopy, amount, repeat, points, isPublic, party, type,
-                reset, display, custom, cStart, cSucc, cFail, actionsCopy,
+                reset, display, custom, cStart, cSucc, cFail, reqQuests, actionsCopy, // [NEW] passed here
                 nextQuestOnComplete, startMode
         );
     }
@@ -147,6 +142,9 @@ public final class QuestEditorDraft {
         if (q.condStart != null) d.condStart.addAll(q.condStart);
         if (q.condSuccess != null) d.condSuccess.addAll(q.condSuccess);
         if (q.condFail != null) d.condFail.addAll(q.condFail);
+
+        // [NEW]
+        if (q.requiredQuests != null) d.requiredQuests.addAll(q.requiredQuests);
 
         if (q.custom != null) {
             d.customEventClass = q.custom.eventClass;

@@ -18,16 +18,15 @@ public final class DynamicEventListener {
     private final QuestEnginePlugin plugin;
     private final Engine engine;
 
-    // 메인 스레드 전용이므로 동기화 불필요 (ArrayList/HashSet 사용으로 속도 향상)
+    // 메인 스레드 전용 리스너 목록
     private final List<Listener> activeListeners = new ArrayList<>();
-
-    // 클래스 로딩 캐시 (메모리 누수 방지를 위해 인스턴스 변수로 변경)
+    // 클래스 캐시
     private final Map<String, Class<? extends Event>> classCache = new HashMap<>();
 
     public DynamicEventListener(QuestEnginePlugin plugin, Engine engine, QuestRepository repo) {
         this.plugin = plugin;
         this.engine = engine;
-        // 1틱 딜레이는 다른 플러그인 로드 대기를 위해 유지
+        // 1틱 딜레이: 다른 플러그인 로드 대기
         Bukkit.getScheduler().runTaskLater(plugin, () -> registerAll(repo), 1L);
     }
 
@@ -36,21 +35,29 @@ public final class DynamicEventListener {
             HandlerList.unregisterAll(l);
         }
         activeListeners.clear();
-        classCache.clear(); // 캐시 정리로 메모리 확보
+        classCache.clear();
     }
 
     private void registerAll(QuestRepository repo) {
         PluginManager pm = Bukkit.getPluginManager();
-
-        // 1. 최적화: 퀘스트 목록을 순회하며 중복된 이벤트 이름을 먼저 Set으로 추출 (Deduplication)
-        // 1000개의 퀘스트가 같은 이벤트를 써도, 등록 루프는 1번만 돕니다.
         Set<String> uniqueEvents = new HashSet<>();
 
+        // 1. 모든 퀘스트의 이벤트 이름 수집
         for (QuestDef def : repo.all()) {
-            if (def == null || def.custom == null) continue;
-            String evt = def.custom.eventClass;
-            if (evt != null && !evt.isEmpty()) {
-                uniqueEvents.add(evt.trim());
+            if (def == null) continue;
+
+            // 일반 이벤트 (m1.yml의 'event' 필드)
+            if (def.event != null && !def.event.isEmpty()) {
+                String evt = def.event.toUpperCase(Locale.ROOT);
+                // [수정] CUSTOM_EVENT 또는 CUSTOM은 클래스 이름이 아니므로 수집에서 제외
+                if (!evt.equals("CUSTOM_EVENT") && !evt.equals("CUSTOM")) {
+                    uniqueEvents.add(evt);
+                }
+            }
+
+            // 커스텀 이벤트 (custom 섹션) - 여기가 진짜 클래스 이름
+            if (def.custom != null && def.custom.eventClass != null) {
+                uniqueEvents.add(def.custom.eventClass);
             }
         }
 
@@ -58,57 +65,94 @@ public final class DynamicEventListener {
 
         int hooked = 0;
 
-        // 2. 최적화: 유니크한 이벤트 목록에 대해서만 리플렉션 및 등록 수행
+        // 2. 이벤트 등록
         for (String evtName : uniqueEvents) {
-            Class<? extends Event> eventClass = loadEventClass(evtName);
+            Class<? extends Event> eventClass = resolveEventClass(evtName);
+
             if (eventClass == null) {
-                // 경고는 한 번만 출력 (로그 스팸 방지)
-                plugin.getLogger().warning("[QuestEngine] Cannot find custom event class: " + evtName);
+                if (!evtName.equals("NONE")) {
+                    plugin.getLogger().warning("[QuestEngine] Unknown event type in quest config: " + evtName);
+                }
                 continue;
             }
 
             try {
-                // EventExecutor: 람다 최적화
+                // EventExecutor: 이벤트 발생 시 Engine으로 전달
                 EventExecutor exec = (listener, event) -> {
-                    // isInstance 체크는 Bukkit 내부에서 보장하지만 안전장치로 유지
                     if (eventClass.isInstance(event)) {
                         engine.handleDynamic(event);
                     }
                 };
 
-                // 익명 클래스 대신 빈 리스너 객체 생성 (가벼움)
                 Listener listener = new Listener() {};
-
-                // MONITOR 우선순위: 다른 플러그인이 캔슬한 것은 무시하고(ignoreCancelled=true), 최종 결과만 확인
+                // MONITOR 우선순위: 다른 플러그인이 캔슬해도 감지 (ignoreCancelled=true)
                 pm.registerEvent(eventClass, listener, EventPriority.MONITOR, exec, plugin, true);
 
                 activeListeners.add(listener);
                 hooked++;
 
+                plugin.getLogger().info("[QuestEngine] Hooked event: " + evtName + " -> " + eventClass.getSimpleName());
+
             } catch (Throwable t) {
                 plugin.getLogger().warning("[QuestEngine] Failed to hook event " + evtName + ": " + t.getMessage());
             }
         }
-
-        if (hooked > 0) {
-            plugin.getLogger().info("[QuestEngine] Hooked " + hooked + " custom event types");
-        }
     }
 
     @SuppressWarnings("unchecked")
-    private Class<? extends Event> loadEventClass(String name) {
-        // computeIfAbsent는 람다 객체를 생성하므로, 단순 반복문에서는 get/put 패턴이 더 빠를 수 있으나
-        // 여기서는 클래스 로딩(Class.forName) 비용이 훨씬 크므로 가독성을 위해 computeIfAbsent 유지
-        return classCache.computeIfAbsent(name, key -> {
-            try {
-                Class<?> clz = Class.forName(key);
-                if (Event.class.isAssignableFrom(clz)) {
-                    return (Class<? extends Event>) clz;
+    private Class<? extends Event> resolveEventClass(String name) {
+        if (classCache.containsKey(name)) return classCache.get(name);
+
+        Class<? extends Event> found = null;
+
+        // 특수 이름 매핑
+        switch (name) {
+            case "MYTHICMOBS_ENTITY_KILL":
+            case "MYTHICMOBS_DEATH":
+                if (Bukkit.getPluginManager().isPluginEnabled("MythicMobs")) {
+                    try {
+                        found = (Class<? extends Event>) Class.forName("io.lumine.mythic.bukkit.events.MythicMobDeathEvent");
+                    } catch (ClassNotFoundException e) {
+                        plugin.getLogger().warning("MythicMobs found but class missing. Check version.");
+                    }
                 }
-                return null;
-            } catch (Throwable ignored) {
-                return null;
-            }
-        });
+                break;
+
+            case "BLOCK_BREAK":
+                found = org.bukkit.event.block.BlockBreakEvent.class;
+                break;
+            case "BLOCK_PLACE":
+                found = org.bukkit.event.block.BlockPlaceEvent.class;
+                break;
+            case "ENTITY_DEATH":
+            case "MOBKILLING":
+            case "ENTITY_KILL":
+                found = org.bukkit.event.entity.EntityDeathEvent.class;
+                break;
+            case "PLAYER_CHAT":
+            case "ASYNC_PLAYER_CHAT":
+                found = org.bukkit.event.player.AsyncPlayerChatEvent.class;
+                break;
+            case "PLAYER_COMMAND":
+                found = org.bukkit.event.player.PlayerCommandPreprocessEvent.class;
+                break;
+            case "ENTITY_INTERACT":
+            case "PLAYER_INTERACT_ENTITY":
+                found = org.bukkit.event.player.PlayerInteractEntityEvent.class;
+                break;
+        }
+
+        // 매핑에 없으면 클래스 이름 그대로 찾아봄 (Reflection)
+        if (found == null) {
+            try {
+                Class<?> clz = Class.forName(name);
+                if (Event.class.isAssignableFrom(clz)) {
+                    found = (Class<? extends Event>) clz;
+                }
+            } catch (ClassNotFoundException ignored) {}
+        }
+
+        classCache.put(name, found);
+        return found;
     }
 }

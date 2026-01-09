@@ -3,6 +3,7 @@
     <output-path>$PROJECT_DIR$/out/artifacts/QuestEngine_jar</output-path>
     <root id="archive" name="QuestEngine.jar">
       <element id="module-output" name="QuestEngine" />
+      <element id="extracted-dir" path="$MAVEN_REPOSITORY$/com/zaxxer/HikariCP/5.1.0/HikariCP-5.1.0.jar" path-in-jar="/" />
     </root>
   </artifact>
 </component>

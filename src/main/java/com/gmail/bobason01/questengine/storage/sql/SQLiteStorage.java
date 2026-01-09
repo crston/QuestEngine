@@ -1,25 +1,29 @@
 package com.gmail.bobason01.questengine.storage.sql;
 
 import com.gmail.bobason01.questengine.QuestEnginePlugin;
+import com.zaxxer.hikari.HikariConfig;
 import java.io.File;
-import java.util.Properties;
 
 public final class SQLiteStorage extends AbstractSqlStorage {
 
     public SQLiteStorage(QuestEnginePlugin plugin) {
-        super(plugin, buildUrl(plugin), new Properties());
+        super(plugin, buildConfig(plugin));
     }
 
-    private static String buildUrl(QuestEnginePlugin plugin) {
+    private static HikariConfig buildConfig(QuestEnginePlugin plugin) {
         String path = plugin.getConfig().getString("storage.sqlite.file", "data/questengine.db");
         File f = new File(plugin.getDataFolder(), path);
         if (!f.getParentFile().exists()) f.getParentFile().mkdirs();
-        return "jdbc:sqlite:" + f.getAbsolutePath();
-    }
 
-    @Override
-    protected String driverClass() {
-        return "org.sqlite.JDBC";
+        HikariConfig config = new HikariConfig();
+        config.setDriverClassName("org.sqlite.JDBC");
+        config.setJdbcUrl("jdbc:sqlite:" + f.getAbsolutePath());
+
+        // SQLite는 풀 사이즈 1이 안전함 (파일 락 때문)
+        config.setMaximumPoolSize(1);
+        config.setConnectionTestQuery("SELECT 1");
+
+        return config;
     }
 
     @Override
@@ -38,7 +42,6 @@ public final class SQLiteStorage extends AbstractSqlStorage {
 
     @Override
     protected String upsertSql() {
-        // SQLite: ON CONFLICT DO UPDATE
         return "INSERT INTO qe_progress (uuid, quest_id, active, completed, value, points, repeat_count) " +
                 "VALUES (?, ?, ?, ?, ?, ?, ?) " +
                 "ON CONFLICT(uuid, quest_id) DO UPDATE SET " +

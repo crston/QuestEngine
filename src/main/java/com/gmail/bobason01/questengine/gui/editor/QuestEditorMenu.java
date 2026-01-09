@@ -22,9 +22,8 @@ import java.io.File;
 import java.util.*;
 
 /**
- * QuestEditorMenu (Fixed Variable Scope)
- * - Fixed: "Variable 'p' is already defined" error by renaming lambda params to 'pl'
- * - Fixed: "Symbol 'player' cannot be resolved" by standardizing variable names
+ * QuestEditorMenu (Complete)
+ * - Added support for 'requiredQuests' in CHAIN tab.
  */
 public final class QuestEditorMenu implements Listener {
 
@@ -40,15 +39,7 @@ public final class QuestEditorMenu implements Listener {
     private final QuestEnginePlugin plugin;
     private final Map<UUID, Session> sessions = new HashMap<>();
 
-    public enum EditorTab {
-        DISPLAY("display"), EVENT("event"), CUSTOM_EVENT("custom_event"),
-        TARGETS("targets"), META("meta"), ACTIONS("actions"),
-        CONDITIONS("conditions"), OPTIONS("options"), CHAIN("chain");
-        private final String key;
-        EditorTab(String key) { this.key = key; }
-        public String key() { return key; }
-    }
-
+    // Tab Enum은 EditorTab.java를 참조하지만 편의상 내부 로직에서 사용
     public enum ActionGroup {
         ACCEPT("accept"), START("start"), SUCCESS("success"), FAIL("fail"),
         CANCEL("cancel"), STOP("stop"), RESTART("restart"), REPEAT("repeat");
@@ -128,7 +119,7 @@ public final class QuestEditorMenu implements Listener {
 
     // --- Inventory Creators ---
     private Inventory createMainInventory(Session session) {
-        String tabName = m("gui.editor.tab." + session.tab.key());
+        String tabName = m("gui.editor.tab." + session.tab.name().toLowerCase());
         String title = m("gui.editor.title.main").replace("%tab%", tabName);
         GuiHolder holder = new GuiHolder(HOLDER_MAIN);
         Inventory inv = Bukkit.createInventory(holder, SIZE, title);
@@ -238,7 +229,7 @@ public final class QuestEditorMenu implements Listener {
         for (int i = 0; i < vals.length; i++) {
             boolean sel = vals[i] == current;
             inv.setItem(i, new ItemBuilder(sel ? Material.BLUE_STAINED_GLASS_PANE : Material.LIGHT_GRAY_STAINED_GLASS_PANE)
-                    .setName((sel ? m("gui.editor.tab.selected") : m("gui.editor.tab.normal")).replace("%name%", m("gui.editor.tab." + vals[i].key())))
+                    .setName((sel ? m("gui.editor.tab.selected") : m("gui.editor.tab.normal")).replace("%name%", m("gui.editor.tab." + vals[i].name().toLowerCase())))
                     .setLore(List.of(sel ? m("gui.editor.tab.lore.current") : m("gui.editor.tab.lore.switch")))
                     .hideAllFlags().build());
         }
@@ -301,7 +292,11 @@ public final class QuestEditorMenu implements Listener {
                 inv.setItem(30, booleanItem("gui.editor.options.party.label", d.party));
                 inv.setItem(40, new ItemBuilder(Material.MAP).setName(m("gui.editor.options.help.title")).setLore(Arrays.asList(m("gui.editor.options.help.help1"), m("gui.editor.options.help.help2"), m("gui.editor.options.help.help3"), m("gui.editor.options.help.help4"))).hideAllFlags().build());
             }
-            case CHAIN -> inv.setItem(10, textItem("gui.editor.chain.next.label", d.nextQuestOnComplete));
+            // [NEW] Added logic for CHAIN tab
+            case CHAIN -> {
+                inv.setItem(10, textItem("gui.editor.chain.next.label", d.nextQuestOnComplete));
+                inv.setItem(12, listItem("gui.editor.chain.required.label", d.requiredQuests));
+            }
         }
     }
 
@@ -324,6 +319,8 @@ public final class QuestEditorMenu implements Listener {
     }
 
     private void ensureActionGroups(QuestEditorDraft d) { for (ActionGroup g : ActionGroup.values()) d.actions.computeIfAbsent(g.key, k -> new ArrayList<>()); }
+
+    // [NEW] Added requiredQuests case
     private List<String> getListReference(QuestEditorDraft d, String key) {
         return switch (key) {
             case "display.description" -> d.displayDescription;
@@ -331,6 +328,7 @@ public final class QuestEditorMenu implements Listener {
             case "conditions.start" -> d.condStart;
             case "conditions.success" -> d.condSuccess;
             case "conditions.fail" -> d.condFail;
+            case "requiredQuests" -> d.requiredQuests; // [NEW]
             default -> key.startsWith("actions.") ? d.actions.computeIfAbsent(key.substring(8), k -> new ArrayList<>()) : null;
         };
     }
@@ -339,7 +337,6 @@ public final class QuestEditorMenu implements Listener {
         if (R) { setter.accept(def); openMainDelayed(p, sessions.get(p.getUniqueId())); }
         else if (L) {
             p.closeInventory();
-            // [Fix] Lambda variable renaming p -> pl to avoid conflict with method parameter p
             ChatInput.await(p, m("gui.editor.prompt.generic_text", "Enter value:"), (pl, s) -> { setter.accept(s); openMainDelayed(pl, sessions.get(pl.getUniqueId())); });
         }
     }
@@ -435,7 +432,11 @@ public final class QuestEditorMenu implements Listener {
                 else if (slot == 28 && L) { d.isPublic = !d.isPublic; openMainDelayed(p, s); }
                 else if (slot == 30 && L) { d.party = !d.party; openMainDelayed(p, s); }
             }
-            case CHAIN -> { if (slot == 10) promptOrClear(p, L, R, "", v -> d.nextQuestOnComplete = v); }
+            // [NEW] Added click logic for CHAIN tab
+            case CHAIN -> {
+                if (slot == 10) promptOrClear(p, L, R, "", v -> d.nextQuestOnComplete = v);
+                else if (slot == 12 && L) openListDelayed(p, "requiredQuests");
+            }
         }
     }
 
@@ -454,12 +455,10 @@ public final class QuestEditorMenu implements Listener {
             else if (e.getClick().isLeftClick()) {
                 String old = list.get(idx);
                 p.closeInventory();
-                // [Fix] Lambda param renaming p -> pl
                 ChatInput.await(p, m("gui.editor.prompt.list_edit").replace("%old%", old), (pl, v) -> { list.set(idx, v); openListDelayed(pl, key); });
             }
         } else if (idx == list.size()) {
             p.closeInventory();
-            // [Fix] Lambda param renaming p -> pl
             ChatInput.await(p, m("gui.editor.prompt.list_add"), (pl, v) -> { list.add(v); openListDelayed(pl, key); });
         }
     }
@@ -494,12 +493,10 @@ public final class QuestEditorMenu implements Listener {
             if (e.getClick().isRightClick()) { s.draft.customCaptures.remove(key); openCapturesDelayed(p); }
             else if (e.getClick().isLeftClick()) {
                 p.closeInventory();
-                // [Fix] Lambda param renaming p -> pl
                 ChatInput.await(p, m("gui.editor.prompt.captures_edit"), (pl, v) -> { if (applyCaptureLine(s.draft, v, true)) openCapturesDelayed(pl); });
             }
         } else if (idx == entries.size()) {
             p.closeInventory();
-            // [Fix] Lambda param renaming p -> pl
             ChatInput.await(p, m("gui.editor.prompt.captures_add"), (pl, v) -> { if (applyCaptureLine(s.draft, v, false)) openCapturesDelayed(pl); });
         }
     }

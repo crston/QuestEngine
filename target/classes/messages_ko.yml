@@ -16,6 +16,7 @@ invalid_args: "&c잘못된 명령어 인수입니다."
 player_only: "&c플레이어만 사용할 수 있는 명령어입니다."
 quest_repeat_ready: "&6'%quest_name%' 퀘스트를 다시 수행할 수 있습니다. /quest start %quest_id% 명령어로 시작하세요!"
 quest_no_repeat: "&c이미 완료한 퀘스트이며 반복할 수 없습니다."
+quest_locked: "&c선행 퀘스트 조건을 만족하지 못해 퀘스트를 시작할 수 없습니다."
 
 # ==========================================================
 # QUEST BOARD & CHAIN SYSTEM
@@ -122,7 +123,6 @@ gui:
       main_prefix: "퀘스트 에디터 -"
       list: "&9목록 에디터 - %key%"
       list_prefix: "목록 에디터 -"
-      # [수정됨] 충돌 방지를 위해 하위 키(.prefix) 제거
       event_view: "&9이벤트 선택 %page%/%max%"
       captures_view: "&9캡처(변수) 에디터"
     tab:
@@ -306,6 +306,8 @@ gui:
     chain:
       next:
         label: "다음 퀘스트 ID"
+      required:
+        label: "선행 퀘스트 목록"
     list:
       add:
         name: "&a항목 추가"

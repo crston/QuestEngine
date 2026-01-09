@@ -7,10 +7,8 @@ import java.io.File;
 import java.util.*;
 
 /**
- * QuestDef (Optimized)
- * - 불변성 보장 (Immutable)
- * - 생성자 로직 간소화 및 Null Safety 강화
- * - YAML 변환 최적화
+ * QuestDef (Updated)
+ * - Added 'requiredQuests' field for prerequisites.
  */
 public final class QuestDef {
 
@@ -39,6 +37,9 @@ public final class QuestDef {
     public final List<String> condSuccess;
     public final List<String> condFail;
 
+    // [NEW] Prerequisites
+    public final List<String> requiredQuests;
+
     // Actions & Chain
     public final Map<String, List<String>> actions;
     public final String nextQuestOnComplete;
@@ -52,6 +53,7 @@ public final class QuestDef {
             int amount, int repeat, int points, boolean isPublic, boolean party,
             String type, Reset reset, Display display, CustomEventData custom,
             List<String> condStart, List<String> condSuccess, List<String> condFail,
+            List<String> requiredQuests, // [NEW]
             Map<String, List<String>> actions, String nextQuestOnComplete, StartMode startMode
     ) {
         this.id = safe(id).toLowerCase(Locale.ROOT);
@@ -76,14 +78,14 @@ public final class QuestDef {
         this.condSuccess = safeList(condSuccess);
         this.condFail = safeList(condFail);
 
+        this.requiredQuests = safeList(requiredQuests); // [NEW]
+
         this.actions = safeMap(actions);
         this.nextQuestOnComplete = safe(nextQuestOnComplete);
 
-        // Hash Pre-computation (Immutable Key로 사용 시 성능 향상)
+        // Hash Pre-computation
         this.hash = Objects.hash(this.id, this.event, this.amount, this.points, this.isPublic);
     }
-
-    // --- Helper Methods for Constructor ---
 
     private static List<String> safeList(List<String> list) {
         return (list == null || list.isEmpty()) ? List.of() : List.copyOf(list);
@@ -97,7 +99,7 @@ public final class QuestDef {
                 copy.put(k.toLowerCase(Locale.ROOT), List.copyOf(v));
             }
         });
-        return Map.copyOf(copy); // Returns unmodifiable map
+        return Map.copyOf(copy);
     }
 
     private static String safe(String s) { return s == null ? "" : s; }
@@ -111,17 +113,14 @@ public final class QuestDef {
         if (this == o) return true;
         if (!(o instanceof QuestDef)) return false;
         QuestDef other = (QuestDef) o;
-        return this.id.equals(other.id); // ID가 유니크 키라고 가정
+        return this.id.equals(other.id);
     }
-
-    // --- Logic Helpers ---
 
     public boolean hasTarget() { return !targets.isEmpty(); }
 
     public boolean matchesTarget(String candidate) {
         if (!hasTarget()) return true;
         if (candidate == null) return false;
-        // Case-insensitive check optimization
         for (String t : targets) {
             if (t.equalsIgnoreCase(candidate)) return true;
         }
@@ -138,24 +137,20 @@ public final class QuestDef {
         String event = yml.getString("event", "CUSTOM");
         String type = yml.getString("type", "vanilla");
 
-        // Targets
         List<String> targets = new ArrayList<>();
         if (yml.isList("targets")) targets.addAll(yml.getStringList("targets"));
         else if (yml.isString("target")) targets.add(yml.getString("target"));
 
-        // Basic Stats
         int amount = yml.getInt("amount", 1);
         int repeat = yml.getInt("repeat", 0);
         int points = yml.getInt("points", 0);
         boolean pub = yml.getBoolean("public", false);
         boolean party = yml.getBoolean("party", false);
 
-        // Start Mode
         StartMode mode = StartMode.NONE;
         try { mode = StartMode.valueOf(yml.getString("start_mode", "NONE").toUpperCase()); }
         catch (Exception ignored) {}
 
-        // Components
         Reset reset = new Reset(yml.getString("reset.policy"), yml.getString("reset.time"));
         Display display = new Display(readSection(yml.getConfigurationSection("display")));
 
@@ -164,12 +159,13 @@ public final class QuestDef {
             custom = CustomEventData.load(yml.getConfigurationSection("custom_event_data"));
         }
 
-        // Conditions
         List<String> cStart = yml.getStringList("conditions.start");
         List<String> cSucc = yml.getStringList("conditions.success");
         List<String> cFail = yml.getStringList("conditions.fail");
 
-        // Actions
+        // [NEW] Load required quests
+        List<String> reqQuests = yml.getStringList("conditions.required_quests");
+
         Map<String, List<String>> actions = new HashMap<>();
         ConfigurationSection actSec = yml.getConfigurationSection("actions");
         if (actSec != null) {
@@ -182,7 +178,7 @@ public final class QuestDef {
 
         return new QuestDef(
                 id, name, event, targets, amount, repeat, points, pub, party, type,
-                reset, display, custom, cStart, cSucc, cFail, actions, next, mode
+                reset, display, custom, cStart, cSucc, cFail, reqQuests, actions, next, mode
         );
     }
 
@@ -214,11 +210,9 @@ public final class QuestDef {
 
         if (!q.nextQuestOnComplete.isEmpty()) yml.set("chain.next", q.nextQuestOnComplete);
 
-        // Reset
         if (!q.reset.policy.isEmpty()) yml.set("reset.policy", q.reset.policy);
         if (!q.reset.time.isEmpty()) yml.set("reset.time", q.reset.time);
 
-        // Display
         if (q.display != null) {
             yml.set("display.title", q.display.title);
             if (!q.display.description.isEmpty()) yml.set("display.description", q.display.description);
@@ -231,23 +225,21 @@ public final class QuestDef {
             if (q.display.customModelData != -1) yml.set("display.customModelData", q.display.customModelData);
         }
 
-        // Conditions
         if (!q.condStart.isEmpty()) yml.set("conditions.start", q.condStart);
         if (!q.condSuccess.isEmpty()) yml.set("conditions.success", q.condSuccess);
         if (!q.condFail.isEmpty()) yml.set("conditions.fail", q.condFail);
 
-        // Actions
+        // [NEW] Save required quests
+        if (!q.requiredQuests.isEmpty()) yml.set("conditions.required_quests", q.requiredQuests);
+
         q.actions.forEach((k, v) -> yml.set("actions." + k, v));
 
-        // Custom Event Data
         if (q.custom != null) {
             yml.createSection("custom_event_data", q.custom.serialize());
         }
 
         return yml;
     }
-
-    // --- Inner Classes ---
 
     public static final class Display {
         public final String title, progress, reward, category, difficulty, icon, hint;

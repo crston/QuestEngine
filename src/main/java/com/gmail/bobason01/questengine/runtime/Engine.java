@@ -2,13 +2,13 @@ package com.gmail.bobason01.questengine.runtime;
 
 import com.gmail.bobason01.questengine.QuestEnginePlugin;
 import com.gmail.bobason01.questengine.action.ActionExecutor;
-import com.gmail.bobason01.questengine.progress.PlayerData;
+import com.gmail.bobason01.questengine.party.PartyHook;
 import com.gmail.bobason01.questengine.progress.ProgressRepository;
 import com.gmail.bobason01.questengine.quest.CustomEventData;
 import com.gmail.bobason01.questengine.quest.QuestDef;
 import com.gmail.bobason01.questengine.quest.QuestRepository;
 import com.gmail.bobason01.questengine.util.Msg;
-import io.lumine.mythic.bukkit.events.MythicMobDeathEvent; // MythicMobs 이벤트 임포트 추가
+import io.lumine.mythic.bukkit.events.MythicMobDeathEvent;
 import me.clip.placeholderapi.PlaceholderAPI;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
@@ -27,8 +27,13 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.function.Supplier;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
+/**
+ * Engine (Updated)
+ * - Added checkRequirements() logic.
+ */
 public final class Engine {
 
     private final QuestEnginePlugin plugin;
@@ -38,25 +43,26 @@ public final class Engine {
     private final Msg msg;
     private final ExecutorService worker;
 
-    // --- Performance Optimizations ---
     private final Map<UUID, Object> playerLocks = new ConcurrentHashMap<>();
     private final Map<UUID, Map<String, Long>> recentEventWindow = new ConcurrentHashMap<>();
-
-    // Parsed Target Cache (Avoids String.split on hot paths)
     private final Map<String, Set<String>> tokenCache = new ConcurrentHashMap<>();
+    private final Map<String, BoolCacheEntry> conditionCache = new ConcurrentHashMap<>();
 
-    // MethodHandle Cache (Replaces slow reflection)
     private static final Map<String, MethodHandle[]> CHAIN_CACHE = new ConcurrentHashMap<>();
     private static final MethodHandles.Lookup LOOKUP = MethodHandles.publicLookup();
 
+    private final Map<UUID, NpcArmState> npcArm = new ConcurrentHashMap<>();
+    private final Map<String, QuestDef[]> customEventIndex = new ConcurrentHashMap<>();
+
     private final Map<String, TargetMatcher> matchers = new ConcurrentHashMap<>();
-    private final Map<String, BoolCacheEntry> conditionCache = new ConcurrentHashMap<>();
 
     private final long conditionTtlNanos;
     private final long dedupWindowNanos;
     private final boolean hasPapi;
+    private final int partyRadius;
 
     private static final long NPC_ARM_WINDOW_NANOS = 2_000_000_000L;
+    private static final Pattern HEX_PATTERN = Pattern.compile("&#([A-Fa-f0-9]{6})");
 
     private static final class BoolCacheEntry {
         final boolean value;
@@ -75,9 +81,6 @@ public final class Engine {
             this.until = until;
         }
     }
-
-    private final Map<UUID, NpcArmState> npcArm = new ConcurrentHashMap<>();
-    private final Map<String, QuestDef[]> customEventIndex = new ConcurrentHashMap<>();
 
     @FunctionalInterface
     public interface TargetMatcher {
@@ -99,8 +102,8 @@ public final class Engine {
         this.msg = msg;
         this.worker = worker;
 
-        // Cache Plugin Status
         this.hasPapi = Bukkit.getPluginManager().isPluginEnabled("PlaceholderAPI");
+        this.partyRadius = plugin.getConfig().getInt("party.share-radius", 50);
 
         long ttlMs = Math.max(50L, plugin.getConfig().getLong("performance.condition-cache-ttl-ms", 300L));
         this.conditionTtlNanos = ttlMs * 1_000_000L;
@@ -113,72 +116,371 @@ public final class Engine {
         preloadInternalQuests();
     }
 
-    public QuestRepository quests() { return quests; }
-    public ProgressRepository progress() { return progress; }
-    public ActionExecutor actions() { return actions; }
-    public Msg msg() { return msg; }
-    public ExecutorService asyncPool() { return worker; }
+    // --- Core Logic ---
 
-    private String format(Player p, String raw) {
-        if (raw == null) return "";
-        if (hasPapi && p != null) {
-            raw = PlaceholderAPI.setPlaceholders(p, raw);
+    // [NEW] Check required quests
+    private boolean checkRequirements(UUID uid, String name, QuestDef def) {
+        if (def.requiredQuests == null || def.requiredQuests.isEmpty()) return true;
+        for (String reqId : def.requiredQuests) {
+            if (!progress.isCompleted(uid, name, reqId)) return false;
         }
-        return ChatColor.translateAlternateColorCodes('&', raw);
+        return true;
     }
 
-    public void refreshEventCache() {
-        quests.reload();
-        quests.rebuildEventMap();
-        tokenCache.clear();
-        CHAIN_CACHE.clear();
-        rebuildCustomEventIndex();
+    public void handle(Player player, String eventName, Event event) {
+        if (player == null || eventName == null) return;
+
+        String key = normalizeEventKey(eventName);
+        QuestDef[] list = quests.byEvent(key);
+        if (list == null || list.length == 0) return;
+
+        UUID uid = player.getUniqueId();
+        if (isDedup(uid, key)) return;
+
+        Collection<Player> partyMembers = PartyHook.membersNear(player, partyRadius);
+        if (partyMembers == null || partyMembers.isEmpty()) {
+            partyMembers = Collections.singletonList(player);
+        }
+
+        String targetLabel = resolveTargetLabel(event);
+        Map<String, Object> ctx = EventContextMapper.map(event);
+
+        Object lock = playerLocks.computeIfAbsent(uid, k -> new Object());
+
+        Collection<Player> finalPartyMembers = partyMembers;
+        worker.execute(() -> {
+            synchronized (lock) {
+                processEventInternal(player, key, targetLabel, event, ctx, list, finalPartyMembers);
+            }
+        });
     }
 
-    public void shutdown() {
-        try { worker.shutdownNow(); } catch (Throwable ignored) {}
-        conditionCache.clear();
-        playerLocks.clear();
-        recentEventWindow.clear();
-        matchers.clear();
-        npcArm.clear();
-        customEventIndex.clear();
-        tokenCache.clear();
-        CHAIN_CACHE.clear();
+    public void handleCustom(Player player, String eventKey, Map<String, Object> ctx) {
+        if (player == null || eventKey == null) return;
+
+        String key = normalizeEventKey(eventKey);
+        QuestDef[] list = quests.byEvent(key);
+        if (list == null || list.length == 0) return;
+
+        UUID uid = player.getUniqueId();
+        if (isDedup(uid, key)) return;
+
+        Collection<Player> partyMembers = PartyHook.membersNear(player, partyRadius);
+        if (partyMembers == null || partyMembers.isEmpty()) {
+            partyMembers = Collections.singletonList(player);
+        }
+
+        Map<String, Object> finalCtx = (ctx == null) ? Collections.emptyMap() : ctx;
+        Object lock = playerLocks.computeIfAbsent(uid, k -> new Object());
+
+        Collection<Player> finalPartyMembers = partyMembers;
+        worker.execute(() -> {
+            synchronized (lock) {
+                if ("ENTITY_INTERACT".equalsIgnoreCase(key)) {
+                    processNpcInteract(player, finalCtx, list);
+                } else {
+                    processCustomInternal(player, key, finalCtx, list, finalPartyMembers);
+                }
+            }
+        });
+    }
+
+    public void handleNpcInteract(Player player, String targetKey) {
+        if (player == null || targetKey == null || targetKey.isEmpty()) return;
+        Map<String, Object> ctx = new HashMap<>();
+        ctx.put("target_id", targetKey);
+        handleCustom(player, "ENTITY_INTERACT", ctx);
+    }
+
+    public void handleDynamic(Player player, String key, Object value) {
+        if (player == null || key == null) return;
+        Map<String, Object> ctx = new HashMap<>();
+        if (value != null) ctx.put("value", value);
+        handleCustom(player, key, ctx);
+    }
+
+    public void handleDynamic(Event event) {
+        if (event == null) return;
+
+        Class<?> clazz = event.getClass();
+        String className = clazz.getName();
+        QuestDef[] customDefs = customEventIndex.get(className);
+
+        if (customDefs != null && customDefs.length > 0) {
+            handleCustomDynamic(event, customDefs);
+            return;
+        }
+
+        Player player = EventContextMapper.extractPlayer(event);
+        if (player == null && event instanceof EntityDeathEvent) {
+            player = ((EntityDeathEvent) event).getEntity().getKiller();
+        }
+        if (player == null) return;
+
+        String key = guessEventKeyFromClass(clazz.getSimpleName());
+        QuestDef[] list = quests.byEvent(key);
+        if (list == null || list.length == 0) return;
+
+        UUID uid = player.getUniqueId();
+        if (isDedup(uid, key)) return;
+
+        Collection<Player> partyMembers = PartyHook.membersNear(player, partyRadius);
+        if (partyMembers == null || partyMembers.isEmpty()) {
+            partyMembers = Collections.singletonList(player);
+        }
+
+        String targetLabel = resolveTargetLabel(event);
+        Map<String, Object> ctx = EventContextMapper.map(event);
+
+        Object lock = playerLocks.computeIfAbsent(uid, k -> new Object());
+        Player finalPlayer = player;
+
+        Collection<Player> finalPartyMembers = partyMembers;
+        worker.execute(() -> {
+            synchronized (lock) {
+                processEventInternal(finalPlayer, key, targetLabel, event, ctx, list, finalPartyMembers);
+            }
+        });
+    }
+
+    private String resolveTargetLabel(Event event) {
+        if (event instanceof BlockBreakEvent) return ((BlockBreakEvent) event).getBlock().getType().name();
+        if (event instanceof BlockPlaceEvent) return ((BlockPlaceEvent) event).getBlockPlaced().getType().name();
+        if (Bukkit.getPluginManager().isPluginEnabled("MythicMobs")) {
+            if (event instanceof MythicMobDeathEvent) {
+                return ((MythicMobDeathEvent) event).getMobType().getInternalName();
+            }
+        }
+        if (event instanceof EntityDeathEvent) return ((EntityDeathEvent) event).getEntity().getType().name();
+        if (event instanceof PlayerCommandPreprocessEvent) {
+            String msg = ((PlayerCommandPreprocessEvent) event).getMessage();
+            if (msg.startsWith("/")) return msg.substring(1);
+            return msg;
+        }
+        if (event instanceof AsyncPlayerChatEvent) return ((AsyncPlayerChatEvent) event).getMessage();
+        return "";
+    }
+
+    private void processEventInternal(
+            Player actor,
+            String eventKey,
+            String targetLabel,
+            Event event,
+            Map<String, Object> ctx,
+            QuestDef[] list,
+            Collection<Player> beneficiaries
+    ) {
+        List<Runnable> pending = null;
+        TargetMatcher matcher = matchers.getOrDefault(eventKey.toLowerCase(Locale.ROOT), matchers.get("*"));
+
+        for (Player beneficiary : beneficiaries) {
+            if (beneficiary == null || !beneficiary.isOnline()) continue;
+
+            UUID uid = beneficiary.getUniqueId();
+            String name = beneficiary.getName();
+            boolean isSelf = beneficiary.equals(actor);
+
+            for (QuestDef def : list) {
+                if (def == null) continue;
+
+                if (!isSelf && !def.party) {
+                    continue;
+                }
+
+                boolean active = progress.isActive(uid, name, def.id);
+
+                // Start Logic
+                if (!active) {
+                    if (def.startMode != QuestDef.StartMode.AUTO) continue;
+                    if (!isSelf && !def.party) continue;
+
+                    if (!progress.canStart(uid, name, def)) continue;
+
+                    // [NEW] Check requirements
+                    if (!checkRequirements(uid, name, def)) continue;
+
+                    if (!checkTargetMatch(actor, event, matcher, def)) continue;
+                    if (!checkConditions(actor, event, ctx, def.condStart)) continue;
+
+                    progress.start(uid, name, def);
+                    actions.runAll(def, "accept", beneficiary);
+                    actions.runAll(def, "start", beneficiary);
+                    beneficiary.sendMessage(format(beneficiary, msg.pref("quest_started").replace("%quest_name%", def.name)));
+                    active = true;
+                }
+
+                if (!active) continue;
+
+                // Progress Logic
+                if (!checkTargetMatch(actor, event, matcher, def)) continue;
+
+                if (checkAnyFail(actor, event, ctx, def.condFail)) {
+                    final String qid = def.id;
+                    if (pending == null) pending = new ArrayList<>();
+                    pending.add(() -> {
+                        actions.runAll(def, "fail", beneficiary);
+                        progress.cancel(uid, name, qid);
+                    });
+                    continue;
+                }
+
+                if (!checkConditions(actor, event, ctx, def.condSuccess)) continue;
+
+                int value = progress.addProgress(uid, name, def.id, 1);
+
+                if (value >= def.amount) {
+                    if (pending == null) pending = new ArrayList<>();
+                    pending.add(() -> handleQuestCompleteOnMain(beneficiary, def));
+                }
+            }
+        }
+
+        if (pending != null) {
+            scheduleMain(pending);
+        }
+    }
+
+    private void processCustomInternal(
+            Player actor,
+            String eventKey,
+            Map<String, Object> ctx,
+            QuestDef[] list,
+            Collection<Player> beneficiaries
+    ) {
+        List<Runnable> pending = null;
+
+        for (Player beneficiary : beneficiaries) {
+            if (beneficiary == null || !beneficiary.isOnline()) continue;
+
+            UUID uid = beneficiary.getUniqueId();
+            String name = beneficiary.getName();
+            boolean isSelf = beneficiary.equals(actor);
+
+            for (QuestDef def : list) {
+                if (def == null) continue;
+                if (!progress.isActive(uid, name, def.id)) continue;
+
+                if (!isSelf && !def.party) continue;
+
+                if (checkAnyFail(actor, null, ctx, def.condFail)) {
+                    final String qid = def.id;
+                    if (pending == null) pending = new ArrayList<>();
+                    pending.add(() -> {
+                        actions.runAll(def, "fail", beneficiary);
+                        progress.cancel(uid, name, qid);
+                    });
+                    continue;
+                }
+
+                if (!checkConditions(actor, null, ctx, def.condSuccess)) continue;
+
+                int value = progress.addProgress(uid, name, def.id, 1);
+                if (value >= def.amount) {
+                    if (pending == null) pending = new ArrayList<>();
+                    pending.add(() -> handleQuestCompleteOnMain(beneficiary, def));
+                }
+            }
+        }
+
+        if (pending != null) scheduleMain(pending);
+    }
+
+    private void processNpcInteract(Player player, Map<String, Object> ctx, QuestDef[] list) {
+        UUID uid = player.getUniqueId();
+        String name = player.getName();
+        String targetId = String.valueOf(ctx.get("target_id")).trim();
+        if (targetId.isEmpty()) return;
+
+        QuestDef candidate = null;
+        for (QuestDef def : list) {
+            if (def == null) continue;
+            if (def.startMode != QuestDef.StartMode.PUBLIC && def.startMode != QuestDef.StartMode.NPC) continue;
+            if (def.hasTarget() && !def.matchesTarget(targetId)) continue;
+
+            if (!progress.canStart(uid, name, def) && !progress.isActive(uid, name, def.id)) continue;
+
+            // [NEW] Check requirements before candidate selection
+            if (!checkRequirements(uid, name, def)) continue;
+
+            candidate = def;
+            break;
+        }
+
+        // [UPDATE] If requirements not met, candidate might be null.
+        // Or we could have selected a candidate and then failed requirements,
+        // but here we filter candidates first.
+        // If user wants a "locked" message, we might need to find the quest even if requirements fail.
+        // For simplicity and performance, we just ignore if requirements fail.
+
+        if (candidate == null) return;
+
+        long now = System.nanoTime();
+        NpcArmState arm = npcArm.get(uid);
+        boolean active = progress.isActive(uid, name, candidate.id);
+        boolean completed = progress.isCompleted(uid, name, candidate.id);
+
+        if (arm != null && arm.questId.equalsIgnoreCase(candidate.id) && arm.until > now) {
+            if (!completed) {
+                if (!checkAnyFail(player, null, ctx, candidate.condFail) && checkConditions(player, null, ctx, candidate.condSuccess)) {
+                    QuestDef finalCandidate = candidate;
+                    Bukkit.getScheduler().runTask(plugin, () -> handleQuestCompleteOnMain(player, finalCandidate));
+                }
+            }
+            npcArm.remove(uid);
+            return;
+        }
+
+        if (!active && !completed) {
+            if (!progress.canStart(uid, name, candidate)) return;
+            // [NEW] Double check requirements just in case
+            if (!checkRequirements(uid, name, candidate)) {
+                player.sendMessage(format(player, msg.pref("quest_locked")));
+                return;
+            }
+
+            if (!checkConditions(player, null, ctx, candidate.condStart)) return;
+
+            progress.start(uid, name, candidate);
+            actions.runAll(candidate, "accept", player);
+            actions.runAll(candidate, "start", player);
+            player.sendMessage(format(player, msg.pref("quest_started").replace("%quest_name%", candidate.name)));
+        }
+        npcArm.put(uid, new NpcArmState(candidate.id, now + NPC_ARM_WINDOW_NANOS));
+    }
+
+    private void handleQuestCompleteOnMain(Player player, QuestDef def) {
+        UUID uid = player.getUniqueId();
+        String name = player.getName();
+        actions.runAll(def, "success", player);
+        progress.complete(uid, name, def);
+        player.sendMessage(format(player, msg.pref("quest_completed").replace("%quest_name%", def.name)));
+        runCompletionFlow(player, def);
     }
 
     public void startQuest(Player p, String questId) {
         if (p == null || questId == null) return;
-        String id = questId.toLowerCase(Locale.ROOT);
-        QuestDef q = quests.get(id);
-        if (q == null) {
-            p.sendMessage(format(p, msg.pref("invalid_args")));
-            return;
-        }
-        startQuest(p, q);
+        startQuest(p, quests.get(questId));
     }
 
     public void startQuest(Player player, QuestDef def) {
         if (player == null || def == null) return;
-
         UUID uid = player.getUniqueId();
         String name = player.getName();
+
+        // [NEW] Check requirements
+        if (!checkRequirements(uid, name, def)) {
+            player.sendMessage(format(player, msg.pref("quest_locked")));
+            return;
+        }
 
         if (!progress.canStart(uid, name, def)) {
             player.sendMessage(format(player, msg.pref("quest_no_repeat").replace("%quest_name%", def.name)));
             return;
         }
-
         if (progress.isActive(uid, name, def.id)) {
             player.sendMessage(format(player, msg.pref("quest_already_active")));
             return;
         }
-
-        if (isBoardQuest(def) && !allowBoardStartContext(player)) {
-            player.sendMessage(format(player, msg.pref("quest_board_only")));
-            return;
-        }
-
         progress.start(uid, name, def);
         actions.runAll(def, "accept", player);
         actions.runAll(def, "start", player);
@@ -187,23 +489,16 @@ public final class Engine {
 
     public void cancelQuest(Player p, String questId) {
         if (p == null || questId == null) return;
-        String id = questId.toLowerCase(Locale.ROOT);
-        QuestDef q = quests.get(id);
-        cancelQuest(p, q);
+        cancelQuest(p, quests.get(questId));
     }
 
     public void cancelQuest(Player player, QuestDef def) {
         if (player == null || def == null) return;
-
-        UUID uid = player.getUniqueId();
-        String name = player.getName();
-
-        if (!progress.isActive(uid, name, def.id)) {
+        if (!progress.isActive(player.getUniqueId(), player.getName(), def.id)) {
             player.sendMessage(format(player, msg.pref("quest_not_active")));
             return;
         }
-
-        progress.cancel(uid, name, def.id);
+        progress.cancel(player.getUniqueId(), player.getName(), def.id);
         actions.runAll(def, "cancel", player);
         player.sendMessage(format(player, msg.pref("quest_canceled").replace("%quest_name%", def.name)));
     }
@@ -248,435 +543,102 @@ public final class Engine {
 
     public void forceComplete(Player player, QuestDef def) {
         if (player == null || def == null) return;
-
-        UUID uid = player.getUniqueId();
-        String name = player.getName();
-
-        progress.complete(uid, name, def);
+        progress.complete(player.getUniqueId(), player.getName(), def);
         actions.runAll(def, "success", player);
         player.sendMessage(format(player, msg.pref("quest_completed").replace("%quest_name%", def.name)));
         runCompletionFlow(player, def);
     }
 
     public void abandonAll(Player player) {
-        if (player == null) return;
-        progress.cancelAll(player.getUniqueId(), player.getName());
-        player.sendMessage(format(player, msg.pref("abandon_all_done")));
+        if (player != null) {
+            progress.cancelAll(player.getUniqueId(), player.getName());
+            player.sendMessage(format(player, msg.pref("abandon_all_done")));
+        }
     }
 
     public void listActiveTo(Player player) {
         if (player == null) return;
-        UUID uid = player.getUniqueId();
-        String name = player.getName();
-
-        List<String> active = progress.activeOf(uid, name);
+        List<String> active = progress.activeOf(player.getUniqueId(), player.getName());
         if (active == null || active.isEmpty()) {
             player.sendMessage(format(player, msg.pref("list_empty")));
             return;
         }
-
         player.sendMessage(format(player, msg.pref("list_header")));
-        StringBuilder sb = new StringBuilder(64);
-
         for (String id : active) {
             QuestDef def = quests.byId(id);
             if (def == null) continue;
-
-            int value = progress.value(uid, name, id);
-            int target = Math.max(1, def.amount);
-            double pct = Math.min(1.0, Math.max(0.0, value / (double) target));
-            int filled = (int) (pct * 20);
-
-            sb.setLength(0);
-            sb.append("§f- §a").append(def.name).append(" §7(§e")
-                    .append(value).append(" / ").append(target).append("§7) ");
-            sb.append("§a");
-            for (int i = 0; i < filled; i++) sb.append('■');
-            sb.append("§7");
-            for (int i = filled; i < 20; i++) sb.append('■');
-
-            player.sendMessage(format(player, sb.toString()));
+            int value = progress.value(player.getUniqueId(), player.getName(), id);
+            player.sendMessage(format(player, "&f- &a" + def.name + " &7(&e" + value + " / " + Math.max(1, def.amount) + "&7)"));
         }
     }
 
-    public void handleNpcInteract(Player player, String targetKey) {
-        if (player == null || targetKey == null || targetKey.isEmpty()) return;
-        Map<String, Object> ctx = new HashMap<>();
-        ctx.put("target_id", targetKey);
-        handleCustom(player, "ENTITY_INTERACT", ctx);
-    }
-
-    // --- Core Logic Optimized ---
-
-    public void handle(Player player, String eventName, Event event) {
-        if (player == null || eventName == null) return;
-
-        String key = normalizeEventKey(eventName);
-        // Fail Fast: Check if any quest listens to this event
-        QuestDef[] list = quests.byEvent(key);
-        if (list == null || list.length == 0) return;
-
-        UUID uid = player.getUniqueId();
-        if (isDedup(uid, key)) return;
-
-        // Optimization: Only create Map if we passed the check
-        Map<String, Object> ctx = EventContextMapper.map(event);
-        Object lock = playerLocks.computeIfAbsent(uid, k -> new Object());
-
-        worker.execute(() -> {
-            synchronized (lock) {
-                processEventInternal(player, key, event, ctx, list);
-            }
-        });
-    }
-
-    public void handleCustom(Player player, String eventKey, Map<String, Object> ctx) {
-        if (player == null || eventKey == null) return;
-
-        String key = normalizeEventKey(eventKey);
-        QuestDef[] list = quests.byEvent(key);
-        if (list == null || list.length == 0) return;
-
-        UUID uid = player.getUniqueId();
-        if (isDedup(uid, key)) return;
-
-        Map<String, Object> finalCtx = (ctx == null) ? Collections.emptyMap() : ctx;
-        Object lock = playerLocks.computeIfAbsent(uid, k -> new Object());
-
-        worker.execute(() -> {
-            synchronized (lock) {
-                if ("ENTITY_INTERACT".equalsIgnoreCase(key)) {
-                    processNpcInteract(player, finalCtx, list);
-                } else {
-                    processCustomInternal(player, key, finalCtx, list);
-                }
-            }
-        });
-    }
-
-    public void handleDynamic(Player player, String key, Object value) {
-        if (player == null || key == null) return;
-        Map<String, Object> ctx = new HashMap<>();
-        if (value != null) ctx.put("value", value);
-        handleCustom(player, key, ctx);
-    }
-
-    public void handleDynamic(Event event) {
-        if (event == null) return;
-
-        Class<?> clazz = event.getClass();
-        String className = clazz.getName();
-        QuestDef[] customDefs = customEventIndex.get(className);
-
-        if (customDefs != null && customDefs.length > 0) {
-            handleCustomDynamic(event, customDefs);
-            return;
-        }
-
-        Player player = EventContextMapper.extractPlayer(event);
-        if (player == null && event instanceof EntityDeathEvent de) {
-            player = de.getEntity().getKiller();
-        }
-        if (player == null) return;
-
-        String key = guessEventKeyFromClass(clazz.getSimpleName());
-        QuestDef[] list = quests.byEvent(key);
-        if (list == null || list.length == 0) return;
-
-        UUID uid = player.getUniqueId();
-        if (isDedup(uid, key)) return;
-
-        Map<String, Object> ctx = EventContextMapper.map(event);
-        Object lock = playerLocks.computeIfAbsent(uid, k -> new Object());
-
-        Player finalPlayer = player;
-        worker.execute(() -> {
-            synchronized (lock) {
-                processEventInternal(finalPlayer, key, event, ctx, list);
-            }
-        });
-    }
-
-    public void completeQuest(Player player, String questId) {
-        if (player == null || questId == null) return;
-        String id = questId.toLowerCase(Locale.ROOT);
-
-        QuestDef def = quests.byId(id);
+    public void runCompletionFlow(Player player, QuestDef def) {
         if (def == null) return;
-
-        PlayerData data = progress.get(player.getUniqueId());
-        if (data == null || !data.isActive(id)) return;
-
-        data.complete(id, def.points, def.repeat);
-        progress.save(data);
-
-        actions.run(def, "success", player);
-
-        if (def.nextQuestOnComplete != null && !def.nextQuestOnComplete.isEmpty()) {
-            QuestDef next = quests.byId(def.nextQuestOnComplete);
-            if (next != null) startQuest(player, next.id);
-        }
-
-        player.sendMessage(format(player, msg.pref("quest_completed")
-                .replace("%quest_name%", def.name)));
-    }
-
-    // --- Internal Processing ---
-
-    private void processEventInternal(Player player, String eventKey, Event event, Map<String, Object> ctx, QuestDef[] list) {
-        UUID uid = player.getUniqueId();
-        String name = player.getName();
-
-        TargetMatcher matcher = matchers.getOrDefault(eventKey.toLowerCase(Locale.ROOT), matchers.get("*"));
-        List<Runnable> pending = null;
-
-        for (QuestDef def : list) {
-            if (def == null) continue;
-
-            boolean active = progress.isActive(uid, name, def.id);
-
-            // Filter 1: Can we start it?
-            if (!active) {
-                if (def.startMode != QuestDef.StartMode.AUTO) continue;
-                if (!progress.canStart(uid, name, def)) continue;
-
-                if (!checkTargetMatch(player, event, matcher, def)) continue;
-                if (!checkConditions(player, event, ctx, def.condStart)) continue;
-
-                progress.start(uid, name, def);
-                actions.runAll(def, "accept", player);
-                actions.runAll(def, "start", player);
-                player.sendMessage(format(player, msg.pref("quest_started").replace("%quest_name%", def.name)));
-                active = true;
-            }
-
-            if (!active) continue;
-
-            // Filter 2: Progress Logic
-            if (!checkTargetMatch(player, event, matcher, def)) continue;
-
-            if (checkAnyFail(player, event, ctx, def.condFail)) {
-                final String qid = def.id;
-                if (pending == null) pending = new ArrayList<>();
-                pending.add(() -> {
-                    actions.runAll(def, "fail", player);
-                    progress.cancel(uid, name, qid);
-                });
-                continue;
-            }
-
-            if (!checkConditions(player, event, ctx, def.condSuccess)) continue;
-
-            int value = progress.addProgress(uid, name, def.id, 1);
-            if (value >= def.amount) {
-                if (pending == null) pending = new ArrayList<>();
-                pending.add(() -> handleQuestCompleteOnMain(player, def));
-            }
-        }
-
-        if (pending != null) {
-            scheduleMain(pending);
-        }
-    }
-
-    private void processCustomInternal(Player player, String eventKey, Map<String, Object> ctx, QuestDef[] list) {
-        UUID uid = player.getUniqueId();
-        String name = player.getName();
-        List<Runnable> pending = null;
-
-        for (QuestDef def : list) {
-            if (def == null) continue;
-            if (!progress.isActive(uid, name, def.id)) continue;
-
-            if (checkAnyFail(player, null, ctx, def.condFail)) {
-                final String qid = def.id;
-                if (pending == null) pending = new ArrayList<>();
-                pending.add(() -> {
-                    actions.runAll(def, "fail", player);
-                    progress.cancel(uid, name, qid);
-                });
-                continue;
-            }
-
-            if (!checkConditions(player, null, ctx, def.condSuccess)) continue;
-
-            if (pending == null) pending = new ArrayList<>();
-            pending.add(() -> handleQuestCompleteOnMain(player, def));
-        }
-
-        if (pending != null) {
-            scheduleMain(pending);
-        }
-    }
-
-    private void processNpcInteract(Player player, Map<String, Object> ctx, QuestDef[] list) {
-        UUID uid = player.getUniqueId();
-        String name = player.getName();
-
-        String targetId = String.valueOf(ctx.get("target_id"));
-        if (targetId == null) targetId = "";
-        targetId = targetId.trim();
-        if (targetId.isEmpty()) return;
-
-        QuestDef candidate = null;
-
-        for (QuestDef def : list) {
-            if (def == null) continue;
-            if (def.startMode != QuestDef.StartMode.PUBLIC && def.startMode != QuestDef.StartMode.NPC) continue;
-
-            boolean matched;
-            if (!def.hasTarget()) {
-                matched = true;
-            } else {
-                matched = def.matchesTarget(targetId);
-            }
-            if (!matched) continue;
-
-            if (!progress.canStart(uid, name, def) && !progress.isActive(uid, name, def.id)) {
-                continue;
-            }
-
-            candidate = def;
-            break;
-        }
-
-        if (candidate == null) return;
-
-        long now = System.nanoTime();
-        NpcArmState arm = npcArm.get(uid);
-
-        boolean active = progress.isActive(uid, name, candidate.id);
-        boolean completed = progress.isCompleted(uid, name, candidate.id);
-
-        if (arm != null && arm.questId.equalsIgnoreCase(candidate.id) && arm.until > now) {
-            if (!completed) {
-                if (!checkAnyFail(player, null, ctx, candidate.condFail) && checkConditions(player, null, ctx, candidate.condSuccess)) {
-                    QuestDef finalCandidate = candidate;
-                    Bukkit.getScheduler().runTask(plugin, () -> handleQuestCompleteOnMain(player, finalCandidate));
-                }
-            }
-            npcArm.remove(uid);
-            return;
-        }
-
-        if (!active && !completed) {
-            if (!progress.canStart(uid, name, candidate)) return;
-            if (!checkConditions(player, null, ctx, candidate.condStart)) return;
-
-            progress.start(uid, name, candidate);
-            actions.runAll(candidate, "accept", player);
-            actions.runAll(candidate, "start", player);
-            player.sendMessage(format(player, msg.pref("quest_started").replace("%quest_name%", candidate.name)));
-        }
-
-        npcArm.put(uid, new NpcArmState(candidate.id, now + NPC_ARM_WINDOW_NANOS));
-    }
-
-    private void handleQuestCompleteOnMain(Player player, QuestDef def) {
-        UUID uid = player.getUniqueId();
-        String name = player.getName();
-
-        actions.runAll(def, "success", player);
-        progress.complete(uid, name, def);
-        player.sendMessage(format(player, msg.pref("quest_completed").replace("%quest_name%", def.name)));
-
-        runCompletionFlow(player, def);
-    }
-
-    private void runCompletionFlow(Player player, QuestDef def) {
-        String nextId = resolveNextId(def);
-
+        String nextId = def.nextQuestOnComplete;
         if (nextId != null && !nextId.isEmpty()) {
             QuestDef next = quests.byId(nextId);
             if (next != null) {
-                if (isBoardQuest(next)) {
-                    player.sendMessage(format(player,
-                            msg.pref("quest_chain_board")
-                                    .replace("%current%", def.name)
-                                    .replace("%next%", next.name)
-                    ));
-                } else {
-                    player.sendMessage(format(player,
-                            msg.pref("quest_chain")
-                                    .replace("%current%", def.name)
-                                    .replace("%next%", next.name)
-                    ));
+                // [NEW] Check requirements for next quest
+                if (checkRequirements(player.getUniqueId(), player.getName(), next)) {
+                    player.sendMessage(format(player, msg.pref("quest_chain").replace("%current%", def.name).replace("%next%", next.name)));
                     startQuest(player, next);
+                } else {
+                    // requirement not met (unlikely if it's a direct chain, but possible if complex)
+                    player.sendMessage(format(player, msg.pref("quest_locked")));
                 }
-            } else {
-                player.sendMessage(format(player, msg.pref("quest_chain_end")));
             }
         }
-
         if (def.repeat < 0) {
-            if (isBoardQuest(def)) {
-                player.sendMessage(format(player,
-                        msg.pref("quest_board_repeat").replace("%quest_name%", def.name)
-                ));
-            } else {
-                Supplier<Boolean> started = () -> {
-                    UUID uid = player.getUniqueId();
-                    String name = player.getName();
-                    if (progress.isActive(uid, name, def.id)) return Boolean.FALSE;
-                    if (!progress.canStart(uid, name, def)) return Boolean.FALSE;
-                    progress.start(uid, name, def);
-                    actions.runAll(def, "restart", player);
-                    actions.runAll(def, "repeat", player);
-                    return Boolean.TRUE;
-                };
-                started.get();
-            }
+            progress.start(player.getUniqueId(), player.getName(), def);
+            actions.runAll(def, "restart", player);
+            actions.runAll(def, "repeat", player);
         }
     }
 
-    private String resolveNextId(QuestDef def) {
-        if (def == null) return null;
-
-        if (def.nextQuestOnComplete != null && !def.nextQuestOnComplete.isEmpty()) {
-            return def.nextQuestOnComplete;
+    public void shutdown() {
+        try {
+            worker.shutdownNow();
+        } catch (Throwable ignored) {
         }
-
-        if (def.actions != null) {
-            List<String> list = def.actions.get("next");
-            if (list != null && !list.isEmpty()) {
-                String raw = list.get(0);
-                if (raw != null) {
-                    String s = raw.trim();
-                    if (!s.isEmpty()) {
-                        int sp = s.indexOf(' ');
-                        return sp > 0 ? s.substring(0, sp) : s;
-                    }
-                }
-            }
-        }
-        return null;
+        conditionCache.clear();
+        playerLocks.clear();
+        recentEventWindow.clear();
+        npcArm.clear();
+        customEventIndex.clear();
+        tokenCache.clear();
+        CHAIN_CACHE.clear();
     }
 
-    private boolean isBoardQuest(QuestDef def) {
-        return def != null && def.isPublic;
+    public void refreshEventCache() {
+        quests.reload();
+        quests.rebuildEventMap();
+        tokenCache.clear();
+        CHAIN_CACHE.clear();
+        rebuildCustomEventIndex();
     }
 
-    private boolean allowBoardStartContext(Player player) {
-        return true;
+    private String format(Player p, String raw) {
+        if (raw == null) return "";
+        if (hasPapi && p != null) raw = PlaceholderAPI.setPlaceholders(p, raw);
+        Matcher matcher = HEX_PATTERN.matcher(raw);
+        StringBuffer buffer = new StringBuffer(raw.length());
+        while (matcher.find()) {
+            String group = matcher.group(1);
+            matcher.appendReplacement(buffer, "§x§" + group.charAt(0) + "§" + group.charAt(1) + "§" + group.charAt(2) + "§" + group.charAt(3) + "§" + group.charAt(4) + "§" + group.charAt(5));
+        }
+        matcher.appendTail(buffer);
+        return ChatColor.translateAlternateColorCodes('&', buffer.toString());
     }
 
     private boolean checkConditions(Player player, Event event, Map<String, Object> ctx, List<String> list) {
         if (list == null || list.isEmpty()) return true;
-        for (String expr : list) {
-            if (!cachedEval(player, event, ctx, expr)) {
-                return false;
-            }
-        }
+        for (String expr : list) if (!cachedEval(player, event, ctx, expr)) return false;
         return true;
     }
 
     private boolean checkAnyFail(Player player, Event event, Map<String, Object> ctx, List<String> list) {
         if (list == null || list.isEmpty()) return false;
-        for (String expr : list) {
-            if (cachedEval(player, event, ctx, expr)) {
-                return true;
-            }
-        }
+        for (String expr : list) if (cachedEval(player, event, ctx, expr)) return true;
         return false;
     }
 
@@ -685,9 +647,7 @@ public final class Engine {
         String key = player.getUniqueId() + "|" + expr;
         long now = System.nanoTime();
         BoolCacheEntry ent = conditionCache.get(key);
-        if (ent != null && ent.expireAt > now) {
-            return ent.value;
-        }
+        if (ent != null && ent.expireAt > now) return ent.value;
         boolean val = ConditionEvaluator.eval(player, event, ctx, expr);
         conditionCache.put(key, new BoolCacheEntry(val, now + conditionTtlNanos));
         return val;
@@ -713,8 +673,6 @@ public final class Engine {
         return false;
     }
 
-    // --- Optimized Matchers with Token Cache ---
-
     private Set<String> getParsedTokens(String target) {
         return tokenCache.computeIfAbsent(target, t -> {
             Set<String> set = new HashSet<>();
@@ -726,14 +684,33 @@ public final class Engine {
         });
     }
 
+    private boolean checkTokens(String value, QuestDef def) {
+        if (!def.hasTarget()) return true;
+        if (value == null) value = "";
+        value = value.toUpperCase(Locale.ROOT);
+
+        for (String rawTarget : def.targets) {
+            if (rawTarget.equals("*")) return true;
+
+            Set<String> tokens = getParsedTokens(rawTarget);
+            if (tokens.contains(value)) return true;
+
+            String finalValue = value;
+            if (value.startsWith("/") && tokens.stream().anyMatch(t -> finalValue.startsWith(t) || finalValue.startsWith("/" + t))) {
+                return true;
+            }
+            if (tokens.stream().anyMatch(value::contains)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private boolean checkTokens(String value, String rawTarget) {
         if (rawTarget == null || rawTarget.isEmpty()) return true;
         Set<String> tokens = getParsedTokens(rawTarget);
         if (tokens.contains(value)) return true;
-
-        if (rawTarget.contains("!")) {
-            return tokenAnyMatchLegacy(value, rawTarget);
-        }
+        if (rawTarget.contains("!")) return tokenAnyMatchLegacy(value, rawTarget);
         return false;
     }
 
@@ -761,13 +738,11 @@ public final class Engine {
             String type = ((BlockBreakEvent) event).getBlock().getType().name();
             return checkTokens(type, target);
         });
-
         matchers.put("block_place", (player, event, target) -> {
             if (!(event instanceof BlockPlaceEvent)) return false;
             String type = ((BlockPlaceEvent) event).getBlockPlaced().getType().name();
             return checkTokens(type, target);
         });
-
         matchers.put("entity_kill", (player, event, target) -> {
             if (!(event instanceof EntityDeathEvent)) return false;
             String type = ((EntityDeathEvent) event).getEntity().getType().name();
@@ -787,7 +762,6 @@ public final class Engine {
             String msg = ((PlayerCommandPreprocessEvent) event).getMessage().toLowerCase(Locale.ROOT);
             return msg.startsWith("/" + target.toLowerCase(Locale.ROOT));
         });
-
         matchers.put("player_chat", (player, event, target) -> {
             if (!(event instanceof AsyncPlayerChatEvent)) return false;
             String msg = ((AsyncPlayerChatEvent) event).getMessage().toLowerCase(Locale.ROOT);
@@ -799,14 +773,13 @@ public final class Engine {
         try {
             refreshEventCache();
         } catch (Throwable t) {
-            plugin.getLogger().warning("[QuestEngine] Internal quest load failed: " + t.getMessage());
+            plugin.getLogger().warning("Load failed: " + t.getMessage());
         }
     }
 
     private void scheduleDailyResets() {
         Map<String, List<String>> timeToQuestIds = new HashMap<>();
         String defaultTime = plugin.getConfig().getString("reset.default-time", "04:00");
-
         for (String id : quests.ids()) {
             QuestDef def = quests.byId(id);
             if (def == null || def.reset == null) continue;
@@ -815,39 +788,27 @@ public final class Engine {
             List<String> list = timeToQuestIds.computeIfAbsent(at, k -> new ArrayList<>());
             list.add(id);
         }
-
         for (Map.Entry<String, List<String>> e : timeToQuestIds.entrySet()) {
             String time = e.getKey();
             long delayMs = millisUntil(time);
             long periodMs = 24L * 60L * 60L * 1000L;
             List<String> copy = Collections.unmodifiableList(new ArrayList<>(e.getValue()));
-
-            Bukkit.getScheduler().runTaskTimerAsynchronously(
-                    plugin,
-                    () -> {
-                        for (Player p : Bukkit.getOnlinePlayers()) {
-                            UUID uid = p.getUniqueId();
-                            String name = p.getName();
-                            for (String qid : copy) {
-                                progress.reset(uid, name, qid);
-                            }
-                        }
-                        plugin.getLogger().info("[QuestEngine] Daily reset done at " + time);
-                    },
-                    delayMs / 50L,
-                    periodMs / 50L
-            );
+            Bukkit.getScheduler().runTaskTimerAsynchronously(plugin, () -> {
+                for (Player p : Bukkit.getOnlinePlayers()) {
+                    for (String qid : copy) progress.reset(p.getUniqueId(), p.getName(), qid);
+                }
+            }, delayMs / 50L, periodMs / 50L);
         }
     }
 
     private long millisUntil(String hhmm) {
         String[] parts = hhmm.split(":");
-        int h = 0;
-        int m = 0;
+        int h = 0, m = 0;
         try {
             h = Integer.parseInt(parts[0]);
             if (parts.length > 1) m = Integer.parseInt(parts[1]);
-        } catch (Throwable ignored) {}
+        } catch (Throwable ignored) {
+        }
         LocalDateTime now = LocalDateTime.now();
         LocalDateTime next = now.withHour(h).withMinute(m).withSecond(0).withNano(0);
         if (!next.isAfter(now)) next = next.plusDays(1);
@@ -855,59 +816,39 @@ public final class Engine {
     }
 
     private String normalizeEventKey(String key) {
-        if (key == null) return "";
-        return key.trim().toUpperCase(Locale.ROOT);
+        return (key == null) ? "" : key.trim().toUpperCase(Locale.ROOT);
     }
 
     private String guessEventKeyFromClass(String simpleName) {
         if (simpleName == null) return "";
         String k = simpleName;
-
-        if (k.endsWith("Event")) k = k.substring(0, k.length() - "Event".length());
-
+        if (k.endsWith("Event")) k = k.substring(0, k.length() - 5);
+        if (k.equalsIgnoreCase("MythicMobDeath")) return "MYTHICMOBS_ENTITY_KILL";
         if (k.equalsIgnoreCase("PlayerInteractEntity")) return "ENTITY_INTERACT";
-        if (k.equalsIgnoreCase("PlayerDropItem")) return "ITEM_DROP";
-        if (k.equalsIgnoreCase("PlayerPickupItem")) return "ITEM_PICKUP";
         if (k.equalsIgnoreCase("EntityDeath")) return "MOBKILLING";
-
-        k = k.replace("MythicMob", "MYTHICMOBS_")
-                .replace("Player", "PLAYER_")
-                .replace("Entity", "ENTITY_")
-                .replace("Block", "BLOCK_")
-                .replace("Inventory", "INVENTORY_")
-                .replace("Item", "ITEM_");
-
-        return k.toUpperCase(Locale.ROOT);
+        return k.replace("MythicMob", "MYTHICMOBS_").replace("Player", "PLAYER_").replace("Entity", "ENTITY_").replace("Block", "BLOCK_").toUpperCase(Locale.ROOT);
     }
 
     private void rebuildCustomEventIndex() {
         customEventIndex.clear();
         Map<String, List<QuestDef>> tmp = new HashMap<>();
         for (QuestDef def : quests.all()) {
-            if (def == null) continue;
-            CustomEventData c = def.custom;
-            if (c == null) continue;
-            String evt = c.eventClass;
-            if (evt == null) continue;
-            evt = evt.trim();
-            if (evt.isEmpty()) continue;
-            List<QuestDef> list = tmp.computeIfAbsent(evt, k -> new ArrayList<>());
-            list.add(def);
+            if (def == null || def.custom == null) continue;
+            String evt = def.custom.eventClass;
+            if (evt == null || evt.isEmpty()) continue;
+            tmp.computeIfAbsent(evt.trim(), k -> new ArrayList<>()).add(def);
         }
         for (Map.Entry<String, List<QuestDef>> e : tmp.entrySet()) {
-            List<QuestDef> list = e.getValue();
-            customEventIndex.put(e.getKey(), list.toArray(new QuestDef[0]));
+            customEventIndex.put(e.getKey(), e.getValue().toArray(new QuestDef[0]));
         }
     }
 
     private void handleCustomDynamic(Event event, QuestDef[] defsForClass) {
         Map<String, Object> baseCtx = null;
-
         for (QuestDef def : defsForClass) {
             if (def == null || def.custom == null) continue;
             Player p = resolveCustomPlayer(event, def.custom);
             if (p == null) continue;
-
             if (baseCtx == null) baseCtx = EventContextMapper.map(event);
 
             UUID uid = p.getUniqueId();
@@ -915,79 +856,52 @@ public final class Engine {
             Map<String, Object> fCtx = baseCtx;
             Player finalP = p;
 
+            Collection<Player> partyMembers = PartyHook.membersNear(p, partyRadius);
+
             worker.execute(() -> {
                 synchronized (lock) {
                     Map<String, Object> ctx = new HashMap<>(fCtx);
                     applyCustomCaptures(event, def.custom, ctx);
                     String eventKey = def.event;
                     QuestDef[] single = new QuestDef[]{def};
-                    processEventInternal(finalP, eventKey, event, ctx, single);
+                    processEventInternal(finalP, eventKey, "", event, ctx, single, partyMembers);
                 }
             });
         }
     }
 
-    // --- MethodHandle Optimization ---
-
     private Player resolveCustomPlayer(Event event, CustomEventData data) {
-        if (data == null) {
-            return EventContextMapper.extractPlayer(event);
-        }
+        if (data == null) return EventContextMapper.extractPlayer(event);
         String getter = data.playerGetter;
-        if (getter == null || getter.isEmpty()) {
-            return EventContextMapper.extractPlayer(event);
-        }
+        if (getter == null || getter.isEmpty()) return EventContextMapper.extractPlayer(event);
         Object o = evalChain(event, getter);
-        if (o instanceof Player) {
-            return (Player) o;
-        }
-        return EventContextMapper.extractPlayer(event);
+        return (o instanceof Player) ? (Player) o : EventContextMapper.extractPlayer(event);
     }
 
     private void applyCustomCaptures(Event event, CustomEventData data, Map<String, Object> ctx) {
-        if (data == null || data.captures == null || data.captures.isEmpty()) {
-            return;
-        }
+        if (data == null || data.captures == null || data.captures.isEmpty()) return;
         for (Map.Entry<String, String> entry : data.captures.entrySet()) {
-            String key = entry.getKey();
-            String chain = entry.getValue();
-            if (key == null || key.isEmpty() || chain == null || chain.isEmpty()) {
-                continue;
-            }
-            Object val = evalChain(event, chain);
-            if (val != null) {
-                ctx.put(key, val);
-            }
+            Object val = evalChain(event, entry.getValue());
+            if (val != null) ctx.put(entry.getKey(), val);
         }
     }
 
     private Object evalChain(Object root, String chain) {
-        if (root == null || chain == null || chain.isEmpty()) {
-            return null;
-        }
-
+        if (root == null || chain == null || chain.isEmpty()) return null;
         String cacheKey = root.getClass().getName() + "#" + chain;
         MethodHandle[] handles = CHAIN_CACHE.get(cacheKey);
-
         try {
             if (handles == null) {
                 String[] parts = chain.split("\\.");
                 List<MethodHandle> list = new ArrayList<>();
                 Class<?> current = root.getClass();
-
                 for (String part : parts) {
-                    String p = part.trim();
-                    if (p.isEmpty()) return null;
-
-                    String name = p;
-                    int idx = p.indexOf('(');
-                    if (idx >= 0) {
-                        name = p.substring(0, idx).trim();
-                    }
-
+                    String name = part.trim();
+                    if (name.isEmpty()) return null;
+                    int idx = name.indexOf('(');
+                    if (idx >= 0) name = name.substring(0, idx).trim();
                     Method m = findNoArgMethod(current, name);
                     if (m == null) return null;
-
                     m.setAccessible(true);
                     list.add(LOOKUP.unreflect(m));
                     current = m.getReturnType();
@@ -995,14 +909,12 @@ public final class Engine {
                 handles = list.toArray(new MethodHandle[0]);
                 CHAIN_CACHE.put(cacheKey, handles);
             }
-
             Object current = root;
             for (MethodHandle mh : handles) {
                 if (current == null) return null;
                 current = mh.invoke(current);
             }
             return current;
-
         } catch (Throwable ex) {
             return null;
         }
@@ -1010,13 +922,7 @@ public final class Engine {
 
     private Method findNoArgMethod(Class<?> type, String name) {
         for (Method m : type.getMethods()) {
-            if (!m.getName().equals(name)) {
-                continue;
-            }
-            if (m.getParameterCount() != 0) {
-                continue;
-            }
-            return m;
+            if (m.getName().equals(name) && m.getParameterCount() == 0) return m;
         }
         return null;
     }
@@ -1027,8 +933,15 @@ public final class Engine {
             for (Runnable r : tasks) {
                 try {
                     r.run();
-                } catch (Throwable ignored) {}
+                } catch (Throwable ignored) {
+                }
             }
         });
     }
+
+    public QuestRepository quests() { return quests; }
+    public ProgressRepository progress() { return progress; }
+    public ActionExecutor actions() { return actions; }
+    public Msg msg() { return msg; }
+    public ExecutorService asyncPool() { return worker; }
 }

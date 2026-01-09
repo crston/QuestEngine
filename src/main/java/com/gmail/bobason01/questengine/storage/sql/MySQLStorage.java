@@ -1,33 +1,44 @@
 package com.gmail.bobason01.questengine.storage.sql;
 
 import com.gmail.bobason01.questengine.QuestEnginePlugin;
-import java.util.Properties;
+import com.zaxxer.hikari.HikariConfig;
 
 public final class MySQLStorage extends AbstractSqlStorage {
 
     public MySQLStorage(QuestEnginePlugin plugin) {
-        super(plugin, buildUrl(plugin), buildProps(plugin));
+        super(plugin, buildConfig(plugin));
     }
 
-    private static String buildUrl(QuestEnginePlugin plugin) {
+    private static HikariConfig buildConfig(QuestEnginePlugin plugin) {
         String host = plugin.getConfig().getString("storage.mysql.host", "localhost");
         int port = plugin.getConfig().getInt("storage.mysql.port", 3306);
         String db = plugin.getConfig().getString("storage.mysql.database", "questengine");
-        // useSSL=false 권장 (SSL 인증서 없으면 에러 날 수 있음)
-        String params = "useSSL=false&characterEncoding=utf8&serverTimezone=UTC&rewriteBatchedStatements=true";
-        return "jdbc:mysql://" + host + ":" + port + "/" + db + "?" + params;
-    }
+        String user = plugin.getConfig().getString("storage.mysql.user", "root");
+        String pass = plugin.getConfig().getString("storage.mysql.password", "");
 
-    private static Properties buildProps(QuestEnginePlugin plugin) {
-        Properties p = new Properties();
-        p.setProperty("user", plugin.getConfig().getString("storage.mysql.user", "root"));
-        p.setProperty("password", plugin.getConfig().getString("storage.mysql.password", ""));
-        return p;
-    }
+        HikariConfig config = new HikariConfig();
+        // MySQL 드라이버 클래스 지정 (명시적)
+        config.setDriverClassName("com.mysql.cj.jdbc.Driver");
+        config.setJdbcUrl("jdbc:mysql://" + host + ":" + port + "/" + db);
+        config.setUsername(user);
+        config.setPassword(pass);
 
-    @Override
-    protected String driverClass() {
-        return "com.mysql.cj.jdbc.Driver";
+        // MySQL 필수/성능 파라미터
+        config.addDataSourceProperty("useSSL", "false");
+        config.addDataSourceProperty("characterEncoding", "utf8");
+        config.addDataSourceProperty("serverTimezone", "UTC");
+
+        // 성능 최적화 설정 (MySQL 특화)
+        config.addDataSourceProperty("cachePrepStmts", "true");
+        config.addDataSourceProperty("prepStmtCacheSize", "250");
+        config.addDataSourceProperty("prepStmtCacheSqlLimit", "2048");
+        config.addDataSourceProperty("useServerPrepStmts", "true");
+        config.addDataSourceProperty("useLocalSessionState", "true");
+        config.addDataSourceProperty("rewriteBatchedStatements", "true");
+        config.addDataSourceProperty("cacheResultSetMetadata", "true");
+        config.addDataSourceProperty("maintainTimeStats", "false");
+
+        return config;
     }
 
     @Override
@@ -46,7 +57,6 @@ public final class MySQLStorage extends AbstractSqlStorage {
 
     @Override
     protected String upsertSql() {
-        // MySQL: ON DUPLICATE KEY UPDATE
         return "INSERT INTO qe_progress (uuid, quest_id, active, completed, value, points, repeat_count) " +
                 "VALUES (?, ?, ?, ?, ?, ?, ?) " +
                 "ON DUPLICATE KEY UPDATE " +
