@@ -19,9 +19,9 @@ import java.util.regex.Pattern;
 
 /**
  * QuestListMenu (Optimized)
- * - Stream API 제거 -> Loop 최적화 (렌더링 속도 향상)
+ * - Stream API 제거 및 Loop 최적화
+ * - 퀘스트 설명(Description) 렌더링 추가
  * - NamespacedKey 캐싱
- * - 불필요한 객체 생성 최소화
  */
 public final class QuestListMenu implements Listener {
 
@@ -115,13 +115,23 @@ public final class QuestListMenu implements Listener {
             int value = plugin.engine().progress().value(p.getUniqueId(), p.getName(), d.id);
             String reward = ChatColor.stripColor(d.display.reward == null ? "" : d.display.reward);
 
-            List<String> lore = new ArrayList<>(loreTemplate.size() + 2);
+            List<String> lore = new ArrayList<>();
+
+            // 퀘스트 설명(Description) 먼저 추가
+            if (d.display != null && d.display.description != null && !d.display.description.isEmpty()) {
+                for (String line : d.display.description) {
+                    lore.add(ChatColor.translateAlternateColorCodes('&', "&7" + line));
+                }
+            }
+
+            // 설정 파일의 Lore 템플릿(진행도 등) 추가
             for (String line : loreTemplate) {
                 lore.add(ChatColor.translateAlternateColorCodes('&', line
                         .replace("%value%", String.valueOf(value))
                         .replace("%target%", String.valueOf(d.amount))
                         .replace("%reward%", reward)));
             }
+
             lore.add(" ");
             lore.add(cancelMsg);
 
@@ -251,7 +261,6 @@ public final class QuestListMenu implements Listener {
         Material mat = Material.matchMaterial(plugin.getConfig().getString(path + ".material", "BOOK"));
         int model = plugin.getConfig().getInt(path + ".model", -1);
         String name = plugin.msg().get(langKey);
-        // Lore는 config에서 가져오거나 lang에서 가져오도록 확장 가능하지만, 여기선 기본 처리
         return createIcon(mat, name, model);
     }
 
