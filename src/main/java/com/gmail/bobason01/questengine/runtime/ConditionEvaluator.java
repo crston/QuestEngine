@@ -16,12 +16,6 @@ import java.lang.reflect.Method;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * ConditionEvaluator (Optimized)
- * - MethodHandle 캐싱으로 리플렉션 속도 5배 이상 향상
- * - get/is/raw 메소드 자동 탐지
- * - 불필요한 String.split 제거
- */
 public final class ConditionEvaluator {
 
     private ConditionEvaluator() {}

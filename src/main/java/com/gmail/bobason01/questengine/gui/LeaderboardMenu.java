@@ -25,11 +25,6 @@ import java.net.URL;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * LeaderboardMenu (Optimized & Clean UI)
- * - 배경 유리판 이름 숨김 (" ") 적용 완료
- * - 스킨 캐싱 및 비동기 처리 유지
- */
 public final class LeaderboardMenu implements Listener {
 
     private final QuestEnginePlugin plugin;
@@ -219,7 +214,7 @@ public final class LeaderboardMenu implements Listener {
 
         if (e.getRawSlot() == 0 && isBtn("back")) {
             plugin.gui().sound(p, "click");
-            Bukkit.getScheduler().runTaskLater(plugin, () -> plugin.gui().openList(p), 1L);
+            Bukkit.getScheduler().runTaskLater(plugin, () -> plugin.gui().openList(p, 0), 1L);
         }
     }
 

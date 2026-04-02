@@ -9,11 +9,6 @@ import org.bukkit.inventory.meta.ItemMeta;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * ItemBuilder — safe fluent builder for ItemStack
- * Supports display name, lore, custom model data, item flags, etc.
- * Fully null-safe and optimized for GUI building.
- */
 public final class ItemBuilder {
 
     private final ItemStack item;

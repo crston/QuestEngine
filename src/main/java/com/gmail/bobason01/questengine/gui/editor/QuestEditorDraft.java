@@ -24,88 +24,78 @@ public final class QuestEditorDraft {
     public final List<String> condStart = new ArrayList<>(4);
     public final List<String> condSuccess = new ArrayList<>(4);
     public final List<String> condFail = new ArrayList<>(4);
-
-    // [NEW] Prerequisites
     public final List<String> requiredQuests = new ArrayList<>(4);
 
-    // Reset
+    // Reset & Chain
     public String resetPolicy = "";
     public String resetTime = "";
-
-    // Chain
     public String nextQuestOnComplete = "";
 
-    // Display
-    public String displayTitle = "&fNo Name Quest";
+    // Display (Resolved symbols: category, difficulty, hint)
+    public String displayTitle = "&fNew Quest";
     public final List<String> displayDescription = new ArrayList<>(4);
     public String displayProgress = "&7%value%/%target%";
     public String displayReward = "";
-    public String displayCategory = "";
-    public String displayDifficulty = "";
+    public String displayCategory = "";   // Added
+    public String displayDifficulty = ""; // Added
     public String displayIcon = "BOOK";
-    public String displayHint = "";
+    public String displayHint = "";       // Added
     public int displayCustomModelData = -1;
+
+    // Left-Click Interaction
+    public String leftClickTip = "";
+    public String leftClickCommand = "";
 
     // Custom Event
     public String customEventClass = "";
-    public String customPlayerGetter = "";
+    public String customPlayerGetter = "getPlayer()";
     public final Map<String, String> customCaptures = new LinkedHashMap<>(4);
 
     // Actions
     public final Map<String, List<String>> actions = new LinkedHashMap<>(8);
 
+    /**
+     * Builds a QuestDef object from the draft data.
+     */
     public QuestDef buildQuestDef() {
-        List<String> tCopy = List.copyOf(targets);
-        List<String> cStart = List.copyOf(condStart);
-        List<String> cSucc = List.copyOf(condSuccess);
-        List<String> cFail = List.copyOf(condFail);
-        List<String> reqQuests = List.copyOf(requiredQuests); // [NEW]
-
-        QuestDef.Reset reset = new QuestDef.Reset(resetPolicy, resetTime);
-
-        Map<String, Object> dMap = new LinkedHashMap<>(8);
+        Map<String, Object> dMap = new LinkedHashMap<>(12);
         dMap.put("title", displayTitle);
-        if (!displayDescription.isEmpty()) dMap.put("description", List.copyOf(displayDescription));
+        dMap.put("description", new ArrayList<>(displayDescription));
         dMap.put("progress", displayProgress);
-        if (!displayReward.isEmpty()) dMap.put("reward", displayReward);
-        if (!displayCategory.isEmpty()) dMap.put("category", displayCategory);
-        if (!displayDifficulty.isEmpty()) dMap.put("difficulty", displayDifficulty);
+        dMap.put("reward", displayReward);
+        dMap.put("category", displayCategory);     // Included
+        dMap.put("difficulty", displayDifficulty); // Included
         dMap.put("icon", displayIcon);
-        if (!displayHint.isEmpty()) dMap.put("hint", displayHint);
-        if (displayCustomModelData != -1) dMap.put("custommodeldata", displayCustomModelData);
+        dMap.put("hint", displayHint);             // Included
+        dMap.put("custommodeldata", displayCustomModelData);
+        dMap.put("left_click_tip", leftClickTip);
+        dMap.put("left_click_command", leftClickCommand);
 
         QuestDef.Display display = new QuestDef.Display(dMap);
+        QuestDef.Reset reset = new QuestDef.Reset(resetPolicy, resetTime);
 
         CustomEventData custom = null;
         if (customEventClass != null && !customEventClass.isEmpty()) {
-            custom = new CustomEventData(
-                    customEventClass,
-                    customPlayerGetter,
-                    customCaptures.isEmpty() ? Collections.emptyMap() : Map.copyOf(customCaptures)
-            );
+            custom = new CustomEventData(customEventClass, customPlayerGetter, Map.copyOf(customCaptures));
         }
 
-        Map<String, List<String>> actionsCopy;
-        if (actions.isEmpty()) {
-            actionsCopy = Collections.emptyMap();
-        } else {
-            actionsCopy = new LinkedHashMap<>(actions.size());
-            actions.forEach((k, v) -> {
-                if (k != null && !k.isEmpty() && v != null && !v.isEmpty()) {
-                    actionsCopy.put(k, List.copyOf(v));
-                }
-            });
-        }
+        Map<String, List<String>> actionsCopy = new HashMap<>();
+        actions.forEach((k, v) -> actionsCopy.put(k, List.copyOf(v)));
 
         return new QuestDef(
-                id, name, event, tCopy, amount, repeat, points, isPublic, party, type,
-                reset, display, custom, cStart, cSucc, cFail, reqQuests, actionsCopy, // [NEW] passed here
-                nextQuestOnComplete, startMode
+                id, name, event, new ArrayList<>(targets), amount, repeat, points,
+                isPublic, party, type, reset, display, custom,
+                new ArrayList<>(condStart), new ArrayList<>(condSuccess), new ArrayList<>(condFail),
+                new ArrayList<>(requiredQuests), actionsCopy, nextQuestOnComplete, startMode
         );
     }
 
+    /**
+     * Populates the draft from an existing QuestDef.
+     */
     public static QuestEditorDraft fromQuest(QuestDef q) {
         QuestEditorDraft d = new QuestEditorDraft();
+        if (q == null) return d;
 
         d.id = q.id;
         d.name = q.name;
@@ -118,18 +108,19 @@ public final class QuestEditorDraft {
         d.party = q.party;
         d.startMode = q.startMode;
 
-        if (q.targets != null) d.targets.addAll(q.targets);
+        d.targets.addAll(q.targets);
+        d.condStart.addAll(q.condStart);
+        d.condSuccess.addAll(q.condSuccess);
+        d.condFail.addAll(q.condFail);
+        d.requiredQuests.addAll(q.requiredQuests);
 
-        if (q.reset != null) {
-            d.resetPolicy = q.reset.policy;
-            d.resetTime = q.reset.time;
-        }
-
+        d.resetPolicy = q.reset.policy;
+        d.resetTime = q.reset.time;
         d.nextQuestOnComplete = q.nextQuestOnComplete;
 
         if (q.display != null) {
             d.displayTitle = q.display.title;
-            if (q.display.description != null) d.displayDescription.addAll(q.display.description);
+            d.displayDescription.addAll(q.display.description);
             d.displayProgress = q.display.progress;
             d.displayReward = q.display.reward;
             d.displayCategory = q.display.category;
@@ -137,26 +128,17 @@ public final class QuestEditorDraft {
             d.displayIcon = q.display.icon;
             d.displayHint = q.display.hint;
             d.displayCustomModelData = q.display.customModelData;
+            d.leftClickTip = q.display.leftClickTip;
+            d.leftClickCommand = q.display.leftClickCommand;
         }
-
-        if (q.condStart != null) d.condStart.addAll(q.condStart);
-        if (q.condSuccess != null) d.condSuccess.addAll(q.condSuccess);
-        if (q.condFail != null) d.condFail.addAll(q.condFail);
-
-        // [NEW]
-        if (q.requiredQuests != null) d.requiredQuests.addAll(q.requiredQuests);
 
         if (q.custom != null) {
             d.customEventClass = q.custom.eventClass;
             d.customPlayerGetter = q.custom.playerGetter;
-            if (q.custom.captures != null) d.customCaptures.putAll(q.custom.captures);
+            d.customCaptures.putAll(q.custom.captures);
         }
 
-        if (q.actions != null) {
-            q.actions.forEach((k, v) -> {
-                if (v != null) d.actions.put(k, new ArrayList<>(v));
-            });
-        }
+        q.actions.forEach((k, v) -> d.actions.put(k, new ArrayList<>(v)));
 
         return d;
     }

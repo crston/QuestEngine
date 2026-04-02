@@ -6,10 +6,6 @@ import org.bukkit.configuration.file.YamlConfiguration;
 import java.io.File;
 import java.util.*;
 
-/**
- * QuestDef (Updated)
- * - Added 'requiredQuests' field for prerequisites.
- */
 public final class QuestDef {
 
     public enum StartMode { NONE, AUTO, PUBLIC, NPC }
@@ -37,23 +33,21 @@ public final class QuestDef {
     public final List<String> condSuccess;
     public final List<String> condFail;
 
-    // [NEW] Prerequisites
+    // Prerequisites
     public final List<String> requiredQuests;
 
     // Actions & Chain
     public final Map<String, List<String>> actions;
     public final String nextQuestOnComplete;
 
-    // Hash Cache
     private final int hash;
 
-    // --- Constructor (Full) ---
     public QuestDef(
             String id, String name, String event, List<String> targets,
             int amount, int repeat, int points, boolean isPublic, boolean party,
             String type, Reset reset, Display display, CustomEventData custom,
             List<String> condStart, List<String> condSuccess, List<String> condFail,
-            List<String> requiredQuests, // [NEW]
+            List<String> requiredQuests,
             Map<String, List<String>> actions, String nextQuestOnComplete, StartMode startMode
     ) {
         this.id = safe(id).toLowerCase(Locale.ROOT);
@@ -78,14 +72,15 @@ public final class QuestDef {
         this.condSuccess = safeList(condSuccess);
         this.condFail = safeList(condFail);
 
-        this.requiredQuests = safeList(requiredQuests); // [NEW]
+        this.requiredQuests = safeList(requiredQuests);
 
         this.actions = safeMap(actions);
         this.nextQuestOnComplete = safe(nextQuestOnComplete);
 
-        // Hash Pre-computation
-        this.hash = Objects.hash(this.id, this.event, this.amount, this.points, this.isPublic);
+        this.hash = Objects.hash(this.id, this.event, this.amount, this.points);
     }
+
+    // --- Static Helpers ---
 
     private static List<String> safeList(List<String> list) {
         return (list == null || list.isEmpty()) ? List.of() : List.copyOf(list);
@@ -111,8 +106,7 @@ public final class QuestDef {
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
-        if (!(o instanceof QuestDef)) return false;
-        QuestDef other = (QuestDef) o;
+        if (!(o instanceof QuestDef other)) return false;
         return this.id.equals(other.id);
     }
 
@@ -162,8 +156,6 @@ public final class QuestDef {
         List<String> cStart = yml.getStringList("conditions.start");
         List<String> cSucc = yml.getStringList("conditions.success");
         List<String> cFail = yml.getStringList("conditions.fail");
-
-        // [NEW] Load required quests
         List<String> reqQuests = yml.getStringList("conditions.required_quests");
 
         Map<String, List<String>> actions = new HashMap<>();
@@ -194,7 +186,6 @@ public final class QuestDef {
     public static YamlConfiguration toYaml(QuestDef q) {
         YamlConfiguration yml = new YamlConfiguration();
 
-        yml.set("id", q.id);
         yml.set("name", q.name);
         yml.set("event", q.event);
         yml.set("type", q.type);
@@ -218,18 +209,23 @@ public final class QuestDef {
             if (!q.display.description.isEmpty()) yml.set("display.description", q.display.description);
             if (!q.display.progress.isEmpty()) yml.set("display.progress", q.display.progress);
             if (!q.display.reward.isEmpty()) yml.set("display.reward", q.display.reward);
+
+            // Fixed Symbol Errors: Saving Category, Difficulty, Hint
             if (!q.display.category.isEmpty()) yml.set("display.category", q.display.category);
             if (!q.display.difficulty.isEmpty()) yml.set("display.difficulty", q.display.difficulty);
-            yml.set("display.icon", q.display.icon);
             if (!q.display.hint.isEmpty()) yml.set("display.hint", q.display.hint);
-            if (q.display.customModelData != -1) yml.set("display.customModelData", q.display.customModelData);
+
+            yml.set("display.icon", q.display.icon);
+            if (!q.display.leftClickTip.isEmpty()) yml.set("display.left_click_tip", q.display.leftClickTip);
+            if (!q.display.leftClickCommand.isEmpty()) yml.set("display.left_click_command", q.display.leftClickCommand);
+
+            if (q.display.customModelData != -1) yml.set("display.custommodeldata", q.display.customModelData);
         }
 
         if (!q.condStart.isEmpty()) yml.set("conditions.start", q.condStart);
         if (!q.condSuccess.isEmpty()) yml.set("conditions.success", q.condSuccess);
         if (!q.condFail.isEmpty()) yml.set("conditions.fail", q.condFail);
 
-        // [NEW] Save required quests
         if (!q.requiredQuests.isEmpty()) yml.set("conditions.required_quests", q.requiredQuests);
 
         q.actions.forEach((k, v) -> yml.set("actions." + k, v));
@@ -241,8 +237,12 @@ public final class QuestDef {
         return yml;
     }
 
+    // --- Inner Classes ---
+
     public static final class Display {
-        public final String title, progress, reward, category, difficulty, icon, hint;
+        public final String title, progress, reward, icon;
+        public final String category, difficulty, hint; // Resolved Symbols
+        public final String leftClickTip, leftClickCommand;
         public final List<String> description;
         public final int customModelData;
 
@@ -251,10 +251,16 @@ public final class QuestDef {
             this.description = getList(map.get("description"));
             this.progress = (String) map.getOrDefault("progress", "&7%value%/%target%");
             this.reward = (String) map.getOrDefault("reward", "");
+
+            // Fixed Symbol Errors: Mapping from YAML Map
             this.category = (String) map.getOrDefault("category", "");
             this.difficulty = (String) map.getOrDefault("difficulty", "");
-            this.icon = ((String) map.getOrDefault("icon", "BOOK")).toUpperCase(Locale.ROOT);
             this.hint = (String) map.getOrDefault("hint", "");
+
+            this.icon = ((String) map.getOrDefault("icon", "BOOK")).toUpperCase(Locale.ROOT);
+            this.leftClickTip = (String) map.getOrDefault("left_click_tip", "");
+            this.leftClickCommand = (String) map.getOrDefault("left_click_command", "");
+
             this.customModelData = map.get("custommodeldata") instanceof Number n ? n.intValue() : -1;
         }
 

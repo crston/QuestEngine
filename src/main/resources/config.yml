@@ -2,6 +2,8 @@
 # QuestEngine Configuration
 # ==========================================================
 
+default-language: "en"
+
 # ----------------------------------------------------------
 # [1] Data Storage Settings
 # ----------------------------------------------------------
@@ -103,6 +105,9 @@ gui:
     public:
       material: BOOK
       model: -1
+    language:
+      material: BOOKSHELF
+      model: -1
     sort:
       material: HOPPER
       model: -1
@@ -127,6 +132,7 @@ gui:
       search: true
       leaderboard: true
       public: true
+      language: true
       sort: true
       prev: true
       next: true

@@ -26,10 +26,6 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * EventContextMapper (Fix 2)
- * - returnNull 메소드를 public으로 변경하여 IllegalAccessError 원천 차단
- */
 public final class EventContextMapper {
 
     private EventContextMapper() {}

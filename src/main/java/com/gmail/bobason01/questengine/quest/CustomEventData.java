@@ -4,12 +4,6 @@ import org.bukkit.configuration.ConfigurationSection;
 
 import java.util.*;
 
-/**
- * CustomEventData
- * - YAML 로드 시 이벤트 클래스와 변수 캡처 규칙을 정의
- * - 런타임 리플렉션 기반 이벤트 감지용
- * - 서버 부팅 시 대량 로드 대비 GC-free 구조
- */
 public final class CustomEventData {
 
     /** 이벤트 클래스의 FQCN (ex: org.bukkit.event.player.PlayerJoinEvent) */

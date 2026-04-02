@@ -18,12 +18,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/**
- * ActionExecutor (Complete Version)
- * - 파싱 결과 캐싱 (컴파일 타임 비용만 지불, 런타임 제로 파싱)
- * - 정규식 기반의 정밀한 파싱
- * - MMOItems / ItemsAdder 완벽 리플렉션 연동 (누락 없음)
- */
 public final class ActionExecutor {
 
     private final Plugin plugin;

@@ -8,11 +8,6 @@ import java.io.File;
 import java.io.IOException;
 import java.util.*;
 
-/**
- * YamlStorage (Optimized)
- * - Human-readable format
- * - Slower than FileStorage/SQL but good for debugging
- */
 public final class YamlStorage implements StorageProvider {
 
     private final QuestEnginePlugin plugin;

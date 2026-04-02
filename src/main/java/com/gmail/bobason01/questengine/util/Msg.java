@@ -2,99 +2,159 @@ package com.gmail.bobason01.questengine.util;
 
 import com.gmail.bobason01.questengine.QuestEnginePlugin;
 import org.bukkit.ChatColor;
-import org.bukkit.configuration.InvalidConfigurationException;
 import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.entity.Player;
 
-import java.io.*;
-import java.nio.charset.StandardCharsets;
+import java.io.File;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * Msg
- * - 색코드(&) 지원 + prefix 선택적
- * - 캐싱 및 실시간 리로드 안정
- */
 public final class Msg {
 
     private final QuestEnginePlugin plugin;
-    private final File file;
-    private volatile YamlConfiguration cfg;
-    private volatile String prefix;
-
-    private final Map<String, String> cache = new ConcurrentHashMap<>();
-    private final Map<String, List<String>> listCache = new ConcurrentHashMap<>();
+    private final Map<String, YamlConfiguration> langFiles = new HashMap<>();
+    private final List<String> availableLanguages = new ArrayList<>();
 
     public Msg(QuestEnginePlugin plugin) {
         this.plugin = plugin;
-        this.file = new File(plugin.getDataFolder(), "messages.yml");
-        if (!file.exists()) {
-            file.getParentFile().mkdirs();
-            try {
-                plugin.saveResource("messages.yml", false);
-            } catch (IllegalArgumentException ignored) {
-                try (Writer w = new OutputStreamWriter(new FileOutputStream(file), StandardCharsets.UTF_8)) {
-                    w.write("prefix: '&7[&aQuestEngine&7] '\n");
-                } catch (IOException ignored2) {}
+        loadLanguages();
+    }
+
+    /**
+     * 언어 폴더에서 모든 .yml 파일을 읽어옵니다.
+     */
+    public void loadLanguages() {
+        File folder = new File(plugin.getDataFolder(), "lang");
+        if (!folder.exists()) {
+            folder.mkdirs();
+            plugin.saveResource("lang/en.yml", false);
+            plugin.saveResource("lang/ko.yml", false);
+        }
+
+        langFiles.clear();
+        availableLanguages.clear();
+        File[] files = folder.listFiles((d, name) -> name.endsWith(".yml"));
+
+        if (files != null) {
+            for (File f : files) {
+                String langCode = f.getName().replace(".yml", "");
+                langFiles.put(langCode, YamlConfiguration.loadConfiguration(f));
+                availableLanguages.add(langCode);
             }
         }
-        reload();
     }
 
-    /** 메시지 파일 다시 로드 */
-    public synchronized void reload() {
-        YamlConfiguration yml = new YamlConfiguration();
-        try (InputStreamReader reader = new InputStreamReader(new FileInputStream(file), StandardCharsets.UTF_8)) {
-            yml.load(reader);
-        } catch (IOException | InvalidConfigurationException ex) {
-            plugin.getLogger().warning("[Msg] Failed to load messages.yml: " + ex.getMessage());
+    /**
+     * [1] 특정 플레이어의 언어 설정에 맞는 메시지를 가져옵니다. (가장 일반적인 사용)
+     */
+    public String get(Player p, String path) {
+        String lang = plugin.progress().of(p.getUniqueId(), p.getName()).getLanguage();
+        return getRaw(lang, path);
+    }
+
+    /**
+     * [2] 인자가 1개일 때 호출됨 (QuestEditorMenu 등에서 사용)
+     * 시스템 기본 언어를 기준으로 메시지를 반환합니다.
+     */
+    public String get(String path) {
+        String defLang = plugin.getConfig().getString("default-language", "en");
+        return getRaw(defLang, path);
+    }
+
+    /**
+     * [3] 인자가 2개이고 모두 문자열일 때 호출됨 (QuestEditorMenu 헬퍼 대응)
+     * 키가 없을 경우 지정된 기본값(def)을 반환합니다.
+     */
+    public String get(String path, String def) {
+        String defLang = plugin.getConfig().getString("default-language", "en");
+        YamlConfiguration config = langFiles.getOrDefault(defLang, langFiles.get("en"));
+
+        if (config == null || !config.contains(path)) {
+            return ChatColor.translateAlternateColorCodes('&', def);
         }
-        this.cfg = yml;
-        this.prefix = ChatColor.translateAlternateColorCodes('&',
-                yml.getString("prefix", "&7[&aQuestEngine&7] "));
-        cache.clear();
-        listCache.clear();
+
+        return ChatColor.translateAlternateColorCodes('&', config.getString(path, def));
     }
 
-    /** 리스트 메시지 (GUI용) */
+    /**
+     * 특정 언어 코드와 경로로 메시지를 가져오는 핵심 로직입니다.
+     */
+    public String getRaw(String langCode, String path) {
+        String defLang = plugin.getConfig().getString("default-language", "en");
+        YamlConfiguration config = langFiles.getOrDefault(langCode, langFiles.get(defLang));
+
+        if (config == null) config = langFiles.get("en");
+        if (config == null) return path; // 최후의 보루: 키 이름 그대로 반환
+
+        String msg = config.getString(path, path);
+        return ChatColor.translateAlternateColorCodes('&', msg);
+    }
+
+    /**
+     * 플레이어의 언어 설정에 맞는 접두사(Prefix) 포함 메시지를 가져옵니다.
+     */
+    public String pref(Player p, String path) {
+        String lang = plugin.progress().of(p.getUniqueId(), p.getName()).getLanguage();
+        String prefix = getRaw(lang, "prefix");
+
+        if (prefix.equalsIgnoreCase("prefix") || prefix.isEmpty()) {
+            prefix = "&7[&aQuestEngine&7] ";
+        }
+
+        return ChatColor.translateAlternateColorCodes('&', prefix + getRaw(lang, path));
+    }
+
+    /**
+     * 시스템 기본 언어 기준 접두사 포함 메시지를 가져옵니다.
+     */
+    public String pref(String path) {
+        String defLang = plugin.getConfig().getString("default-language", "en");
+        String prefix = getRaw(defLang, "prefix");
+        if (prefix.equalsIgnoreCase("prefix")) prefix = "&7[&aQuestEngine&7] ";
+
+        return ChatColor.translateAlternateColorCodes('&', prefix + getRaw(defLang, path));
+    }
+
+    /**
+     * 플레이어 언어 설정에 따른 문자열 리스트(Lore)를 가져옵니다.
+     */
+    public List<String> list(Player p, String path) {
+        String lang = plugin.progress().of(p.getUniqueId(), p.getName()).getLanguage();
+        return listRaw(lang, path);
+    }
+
+    /**
+     * 플레이어 인자 없이 리스트를 가져올 때 사용 (기본 언어 기준)
+     */
     public List<String> list(String path) {
-        return listCache.computeIfAbsent(path, p -> {
-            List<String> list = cfg.getStringList(p);
-            if (list != null && !list.isEmpty()) {
-                List<String> colored = new ArrayList<>(list.size());
-                for (String s : list)
-                    colored.add(applyColor(s));
-                return Collections.unmodifiableList(colored);
-            }
-            String single = cfg.getString(p);
-            if (single != null && !single.isEmpty()) {
-                return List.of(applyColor(single));
-            }
-            return List.of("§c<missing-list:" + p + ">");
-        });
+        String defLang = plugin.getConfig().getString("default-language", "en");
+        return listRaw(defLang, path);
     }
 
-    /** prefix 없이 색 적용 */
-    public String get(String key) {
-        return cache.computeIfAbsent("get:" + key, k ->
-                applyColor(cfg.getString(key, key))
-        );
+    private List<String> listRaw(String langCode, String path) {
+        YamlConfiguration config = langFiles.getOrDefault(langCode, langFiles.get("en"));
+        if (config == null) return Collections.emptyList();
+
+        List<String> raw = config.getStringList(path);
+        List<String> colored = new ArrayList<>();
+        for (String s : raw) {
+            colored.add(ChatColor.translateAlternateColorCodes('&', s));
+        }
+        return colored;
     }
 
-    public String get(String key, String def) {
-        String val = get(key);
-        return (val == null || val.isEmpty()) ? def : val;
+    /**
+     * 문자열에 컬러 코드를 입힙니다.
+     */
+    public String color(String text) {
+        if (text == null) return "";
+        return ChatColor.translateAlternateColorCodes('&', text);
     }
 
-    /** prefix 포함 */
-    public String pref(String key) {
-        return cache.computeIfAbsent("pref:" + key, k ->
-                prefix + applyColor(cfg.getString(key, key))
-        );
+    public List<String> getAvailableLanguages() {
+        return Collections.unmodifiableList(availableLanguages);
     }
 
-    /** 실제 색코드 변환 */
-    private static String applyColor(String s) {
-        return ChatColor.translateAlternateColorCodes('&', s == null ? "" : s);
+    public void reload() {
+        loadLanguages();
     }
 }

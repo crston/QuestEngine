@@ -9,11 +9,6 @@ import org.bukkit.command.TabExecutor;
 import java.util.Collections;
 import java.util.List;
 
-/**
- * BaseCommand
- * - TabExecutor 구현으로 통일
- * - 공통 필드 최적화
- */
 public abstract class BaseCommand implements TabExecutor {
 
     protected final QuestEnginePlugin plugin;

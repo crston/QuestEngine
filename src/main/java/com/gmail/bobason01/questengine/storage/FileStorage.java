@@ -8,12 +8,6 @@ import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.*;
 
-/**
- * FileStorage (Optimized)
- * - Binary Format: Compact & Fast
- * - Atomic Write: Prevents data corruption on crash
- * - Added repeat_count support
- */
 public final class FileStorage implements StorageProvider {
 
     private final QuestEnginePlugin plugin;

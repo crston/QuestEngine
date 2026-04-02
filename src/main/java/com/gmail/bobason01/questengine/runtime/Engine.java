@@ -30,10 +30,6 @@ import java.util.concurrent.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/**
- * Engine (Updated)
- * - Added checkRequirements() logic.
- */
 public final class Engine {
 
     private final QuestEnginePlugin plugin;

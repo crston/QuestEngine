@@ -11,12 +11,6 @@ import org.bukkit.entity.Player;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * QuestPapiExpansion (Optimized)
- * - Zero-Allocation Parsing (split 최소화)
- * - Smart Caching (정적 데이터와 동적 데이터 분리)
- * - String Concatenation Optimization (StringBuilder)
- */
 public final class QuestPapiExpansion extends PlaceholderExpansion {
 
     private final QuestEnginePlugin plugin;

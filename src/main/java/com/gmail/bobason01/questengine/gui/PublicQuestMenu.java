@@ -161,7 +161,7 @@ public final class PublicQuestMenu implements Listener {
 
         if (slot == 0 && isBtn("back")) {
             plugin.gui().sound(p, "click");
-            Bukkit.getScheduler().runTaskLater(plugin, () -> plugin.gui().openList(p), 1L);
+            Bukkit.getScheduler().runTaskLater(plugin, () -> plugin.gui().openList(p, 0), 1L);
             return;
         }
         if (slot == 8 && isBtn("search")) {

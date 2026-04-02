@@ -9,11 +9,6 @@ import org.bukkit.event.inventory.*;
 import org.bukkit.event.player.PlayerDropItemEvent;
 import org.bukkit.inventory.Inventory;
 
-/**
- * GuiProtectionListener (Optimized)
- * - "Q_"로 시작하는 모든 내부 GUI에 대한 아이템 이동/수정/드롭 완벽 차단
- * - 로직 처리는 각 메뉴의 리스너(QuestEditorMenu 등)가 담당
- */
 public final class GuiProtectionListener implements Listener {
 
     public GuiProtectionListener(QuestEnginePlugin plugin) {

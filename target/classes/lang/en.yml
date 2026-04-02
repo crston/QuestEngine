@@ -1,5 +1,11 @@
 prefix: "&7[&aQuestEngine&7] "
 
+# Language System
+language_changed: "&aLanguage has been changed to %lang%."
+language_selector_title: "&8Select Language"
+language_item_name: "&e%lang_name%"
+language_item_lore: "&7Click to switch language to %lang_code%"
+
 vault_missing: "&cVault plugin not found. Some features will be limited."
 quest_already_active: "&cYou are already active on this quest."
 quest_started: "&aStarted quest '%quest_name%'!"
@@ -31,8 +37,9 @@ quest_chain_end: "&aAll chained quests completed."
 # ADMIN
 # ==========================================================
 admin:
-  usage: "&7/questadmin <reload|give|complete|stop|reset|list>"
+  usage: "&7/questadmin <reload|give|complete|stop|reset|list|points|rank|lang>"
   reloaded: "&aAll quests reloaded!"
+  reload_fail: "&c[QuestEngine] Reload failed: %msg%"
   invalid_args: "&cInvalid arguments!"
   offline: "&cPlayer is offline!"
   started: "&aForce started quest: %quest_name%"
@@ -43,6 +50,9 @@ admin:
   no_active: "&7No active quests."
   points: "&e%player%'s Quest Points: &f%points%"
   rank_calc: "&7Calculating rankings..."
+  rank_header: "&a===== Quest Points Ranking ====="
+  rank_entry: "&7#%rank% &f%player% &8- &e%points% pts"
+  no_data: "&7No ranking data available."
 
 # ==========================================================
 # GUI COMMON
@@ -69,6 +79,8 @@ gui:
     leaderboard_lore: "&7Click to view quest point ranking"
     public: "&b📖 Quest Board"
     public_lore: "&7Click to open the Quest Board"
+    lang_button: "&f🌐 Language"
+    lang_lore: "&7Click to change your language"
     sort: "&fSort: &e%order%"
     sort_lore: "&7Click to change sort order"
     order_asc: "Ascending"
@@ -79,8 +91,7 @@ gui:
     page_input_lore: "&7Click to enter page number directly"
     page_input_prompt: "Enter page number to visit"
     points: "&fYour Quest Points: &a%points%"
-    left_click_start: "&aLeft-Click: Start Quest"
-    right_click_cancel: "&cRight-Click: Quit Quest"
+    click_guide: "&e[Left] Tip &7| &c[Right] Quit"
     quest_completed: "&aQuest Completed: &f%quest%"
     quest_cancelled: "&7Quest Cancelled: &f%quest%"
     quest_cannot_complete: "&cCompletion conditions not met."
@@ -169,13 +180,17 @@ gui:
       cmd:
         label: "Custom Model Data"
       hint:
-        label: "Hint Message"
+        label: "Hint Command"
       reward:
         label: "Reward Description"
       category:
         label: "Category"
       difficulty:
         label: "Difficulty"
+      left_tip:
+        label: "Left-Click Tip"
+      left_cmd:
+        label: "Left-Click Command"
       icon:
         name: "&6Display Icon"
         value: "&bItem: %value%"
@@ -327,10 +342,12 @@ gui:
       display_icon: "&eEnter icon Material:"
       display_progress: "&eEnter progress format:"
       display_cmd: "&eEnter CustomModelData (-1 for none):"
-      display_hint: "&eEnter hint message:"
+      display_hint: "&eEnter hint command:"
       display_reward: "&eEnter reward description:"
       display_category: "&eEnter category:"
       display_difficulty: "&eEnter difficulty:"
+      display_left_tip: "&eEnter chat tip for left-click:"
+      display_left_cmd: "&eEnter command for left-click (Ex: gps point %player% 100 64 100):"
       event_name: "&eEnter event name:"
       event_type: "&eEnter quest type:"
       custom_event_class: "&eEnter custom event class (w/ package):"

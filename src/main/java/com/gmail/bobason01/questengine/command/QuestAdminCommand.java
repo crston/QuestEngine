@@ -16,12 +16,10 @@ import java.util.concurrent.CompletableFuture;
 
 public final class QuestAdminCommand extends BaseCommand {
 
-    // 불변 리스트 (Java 9+ List.of 사용 권장, 호환성 위해 Arrays.asList 유지하되 static final)
     private static final List<String> SUBS = Arrays.asList(
             "reload", "give", "stop", "complete", "reset", "list", "points", "rank"
     );
 
-    // 검색 속도를 위한 HashSet (O(1))
     private static final Set<String> SUBS_NEED_PLAYER = new HashSet<>(Arrays.asList(
             "give", "stop", "complete", "reset", "list", "points"
     ));
@@ -61,22 +59,14 @@ public final class QuestAdminCommand extends BaseCommand {
         return true;
     }
 
-    // --- Handlers ---
-
     private void handleReload(CommandSender sender) {
         try {
             plugin.msg().reload();
             plugin.engine().refreshEventCache();
-            sender.sendMessage(color("&a[QuestEngine] Reload complete."));
+            sender.sendMessage(color("a[QuestEngine] Reload complete"));
         } catch (Throwable t) {
-            sender.sendMessage(color("&c[QuestEngine] Reload failed: " + t.getMessage()));
-            t.printStackTrace();
+            sender.sendMessage(color("c[QuestEngine] Reload failed " + t.getMessage()));
         }
-    }
-
-    // 최적화: getPlayer()는 느림(Fuzzy Search). getPlayerExact()는 빠름(HashMap Lookup).
-    private Player getPlayerFast(String name) {
-        return Bukkit.getPlayerExact(name);
     }
 
     private void handleGive(CommandSender sender, String[] args) {
@@ -84,16 +74,14 @@ public final class QuestAdminCommand extends BaseCommand {
             sender.sendMessage(color(msg.get("admin.usage")));
             return;
         }
-        Player target = getPlayerFast(args[1]);
+        Player target = Bukkit.getPlayerExact(args[1]);
         QuestDef def = plugin.engine().quests().get(args[2]);
-
         if (target == null || def == null) {
             sender.sendMessage(color(msg.get("admin.invalid_args")));
             return;
         }
         plugin.engine().startQuest(target, def);
-        sender.sendMessage(color(msg.get("admin.started")
-                .replace("%quest_name%", def.display.title).replace("%player%", target.getName())));
+        sender.sendMessage(color(msg.get("admin.started").replace("%quest_name%", def.display.title).replace("%player%", target.getName())));
     }
 
     private void handleStop(CommandSender sender, String[] args) {
@@ -101,16 +89,14 @@ public final class QuestAdminCommand extends BaseCommand {
             sender.sendMessage(color(msg.get("admin.usage")));
             return;
         }
-        Player target = getPlayerFast(args[1]);
+        Player target = Bukkit.getPlayerExact(args[1]);
         QuestDef def = plugin.engine().quests().get(args[2]);
-
         if (target == null || def == null) {
             sender.sendMessage(color(msg.get("admin.invalid_args")));
             return;
         }
         plugin.engine().stopQuest(target, def);
-        sender.sendMessage(color(msg.get("admin.stopped")
-                .replace("%quest_name%", def.display.title).replace("%player%", target.getName())));
+        sender.sendMessage(color(msg.get("admin.stopped").replace("%quest_name%", def.display.title).replace("%player%", target.getName())));
     }
 
     private void handleComplete(CommandSender sender, String[] args) {
@@ -118,16 +104,14 @@ public final class QuestAdminCommand extends BaseCommand {
             sender.sendMessage(color(msg.get("admin.usage")));
             return;
         }
-        Player target = getPlayerFast(args[1]);
+        Player target = Bukkit.getPlayerExact(args[1]);
         QuestDef def = plugin.engine().quests().get(args[2]);
-
         if (target == null || def == null) {
             sender.sendMessage(color(msg.get("admin.invalid_args")));
             return;
         }
         plugin.engine().forceComplete(target, def);
-        sender.sendMessage(color(msg.get("admin.completed")
-                .replace("%quest_name%", def.display.title).replace("%player%", target.getName())));
+        sender.sendMessage(color(msg.get("admin.completed").replace("%quest_name%", def.display.title).replace("%player%", target.getName())));
     }
 
     private void handleReset(CommandSender sender, String[] args) {
@@ -135,23 +119,19 @@ public final class QuestAdminCommand extends BaseCommand {
             sender.sendMessage(color(msg.get("admin.usage")));
             return;
         }
-        Player target = getPlayerFast(args[1]);
+        Player target = Bukkit.getPlayerExact(args[1]);
         if (target == null) {
             sender.sendMessage(color(msg.get("admin.offline")));
             return;
         }
         String questId = args[2];
         plugin.engine().progress().reset(target.getUniqueId(), target.getName(), questId);
-
-        // 캐시 갱신
         var pd = plugin.engine().progress().get(target.getUniqueId());
         if (pd != null) {
             pd.cancel(questId);
             pd.setRepeatCount(questId, 0);
         }
-
-        sender.sendMessage(color(msg.get("admin.reset_done")
-                .replace("%quest_name%", questId).replace("%player%", target.getName())));
+        sender.sendMessage(color(msg.get("admin.reset_done").replace("%quest_name%", questId).replace("%player%", target.getName())));
     }
 
     private void handleList(CommandSender sender, String[] args) {
@@ -159,7 +139,7 @@ public final class QuestAdminCommand extends BaseCommand {
             sender.sendMessage(color(msg.get("admin.usage")));
             return;
         }
-        Player target = getPlayerFast(args[1]);
+        Player target = Bukkit.getPlayerExact(args[1]);
         if (target == null) {
             sender.sendMessage(color(msg.get("admin.offline")));
             return;
@@ -172,85 +152,59 @@ public final class QuestAdminCommand extends BaseCommand {
             sender.sendMessage(color(msg.get("admin.usage")));
             return;
         }
-        Player target = getPlayerFast(args[1]);
+        Player target = Bukkit.getPlayerExact(args[1]);
         if (target == null) {
             sender.sendMessage(color(msg.get("admin.offline")));
             return;
         }
         int pts = plugin.engine().progress().getPoints(target.getUniqueId());
-        sender.sendMessage(color(msg.get("admin.points")
-                .replace("%player%", target.getName()).replace("%points%", String.valueOf(pts))));
+        sender.sendMessage(color(msg.get("admin.points").replace("%player%", target.getName()).replace("%points%", String.valueOf(pts))));
     }
 
     private void handleRank(CommandSender sender) {
         sender.sendMessage(color(msg.get("admin.rank_calc")));
-
         CompletableFuture.runAsync(() -> {
             Map<UUID, Integer> all = plugin.engine().progress().getAllPoints();
             if (all == null || all.isEmpty()) {
-                sender.sendMessage(color("&7No data"));
+                sender.sendMessage(color("7No data"));
                 return;
             }
 
-            // Top 10 PriorityQueue Logic (Optimized)
-            PriorityQueue<Map.Entry<UUID, Integer>> pq =
-                    new PriorityQueue<>(10, Comparator.comparingInt(Map.Entry::getValue));
-
+            PriorityQueue<Map.Entry<UUID, Integer>> pq = new PriorityQueue<>(11, Comparator.comparingInt(Map.Entry::getValue));
             for (Map.Entry<UUID, Integer> e : all.entrySet()) {
-                if (pq.size() < 10) {
-                    pq.offer(e);
-                } else if (e.getValue() > pq.peek().getValue()) {
-                    pq.poll();
-                    pq.offer(e);
-                }
+                pq.offer(e);
+                if (pq.size() > 10) pq.poll();
             }
 
             List<Map.Entry<UUID, Integer>> top = new ArrayList<>(pq);
             top.sort((a, b) -> Integer.compare(b.getValue(), a.getValue()));
 
-            StringBuilder sb = new StringBuilder(256);
-            sb.append("§a[Quest Points Ranking]\n");
-
+            StringBuilder sb = new StringBuilder();
+            sb.append("§aQuest Points Ranking\n");
             int rank = 1;
             for (Map.Entry<UUID, Integer> e : top) {
                 String name = "Unknown";
-                Player p = Bukkit.getPlayer(e.getKey());
-                if (p != null) name = p.getName();
-                else {
-                    OfflinePlayer off = Bukkit.getOfflinePlayer(e.getKey());
-                    if (off.getName() != null) name = off.getName();
-                }
-
-                sb.append("§7#").append(rank++).append(" §f").append(name)
-                        .append(" §8- §e").append(e.getValue()).append("\n");
+                OfflinePlayer off = Bukkit.getOfflinePlayer(e.getKey());
+                if (off.getName() != null) name = off.getName();
+                sb.append("§7#").append(rank++).append(" §f").append(name).append(" §8- §e").append(e.getValue()).append("\n");
             }
-
             String result = sb.toString();
             Bukkit.getScheduler().runTask(plugin, () -> sender.sendMessage(result));
         }, plugin.engine().asyncPool());
     }
 
-    // --- Tab Completion Optimized ---
-
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String label, String[] args) {
         if (args.length == 1) {
-            // Bukkit 내장 유틸 사용 (가장 빠르고 정확함)
-            return StringUtil.copyPartialMatches(args[0], SUBS, new ArrayList<>(SUBS.size()));
+            return StringUtil.copyPartialMatches(args[0], SUBS, new ArrayList<>());
         }
-
         String sub = args[0].toLowerCase(Locale.ROOT);
-
         if (args.length == 2 && SUBS_NEED_PLAYER.contains(sub)) {
-            // 온라인 플레이어 이름만 추출 (null safe)
-            return null; // return null하면 Bukkit이 자동으로 온라인 플레이어 목록을 보여줌 (가장 최적화된 방법)
+            return null;
         }
-
         if (args.length == 3 && SUBS_NEED_QUEST.contains(sub)) {
-            Collection<String> ids = plugin.engine().quests().ids();
-            return StringUtil.copyPartialMatches(args[2], ids, new ArrayList<>(ids.size()));
+            return StringUtil.copyPartialMatches(args[2], plugin.engine().quests().ids(), new ArrayList<>());
         }
-
         return Collections.emptyList();
     }
 

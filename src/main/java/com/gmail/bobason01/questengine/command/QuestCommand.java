@@ -15,7 +15,7 @@ import java.util.concurrent.CompletableFuture;
 public final class QuestCommand extends BaseCommand {
 
     private static final List<String> SUBS = Arrays.asList(
-            "start", "cancel", "list", "public", "top", "abandonall", "points"
+            "start", "cancel", "list", "public", "top", "abandonall", "points", "lang"
     );
 
     public QuestCommand(QuestEnginePlugin plugin) {
@@ -30,18 +30,18 @@ public final class QuestCommand extends BaseCommand {
     @Override
     public boolean onCommand(CommandSender s, Command c, String l, String[] a) {
         if (!(s instanceof Player p)) {
-            s.sendMessage(plugin.msg().get("player_only"));
+            // 콘솔은 기본 언어(en)로 출력
+            s.sendMessage(plugin.msg().getRaw("en", "player_only"));
             return true;
         }
 
         if (a.length == 0) {
             plugin.gui().putSession(p, "list_search", "");
-            plugin.gui().openList(p);
+            plugin.gui().openList(p, 0);
             return true;
         }
 
         String sub = a[0].toLowerCase(Locale.ROOT);
-
         switch (sub) {
             case "start" -> {
                 if (a.length < 2) return msg(p, "invalid_args");
@@ -57,41 +57,65 @@ public final class QuestCommand extends BaseCommand {
             }
             case "list" -> {
                 plugin.gui().putSession(p, "list_search", "");
-                plugin.gui().openList(p);
+                plugin.gui().openList(p, 0);
             }
-            case "public" -> plugin.gui().openPublic(p);
+            case "public" -> plugin.gui().openPublic(p, 0);
             case "top" -> plugin.gui().openLeaderboard(p);
             case "abandonall" -> {
                 plugin.engine().abandonAll(p);
-                p.sendMessage(plugin.msg().get("abandon_all_done"));
+                p.sendMessage(plugin.msg().get(p, "abandon_all_done"));
             }
             case "points" -> showPoints(p);
+            case "lang" -> handleLang(p, a);
             default -> msg(p, "invalid_args");
         }
         return true;
     }
 
+    private void handleLang(Player p, String[] a) {
+        if (a.length < 2) {
+            // 인자가 없으면 언어 선택 GUI 오픈 (구현 예정인 경우)
+            // plugin.gui().openLanguageMenu(p);
+            p.sendMessage(plugin.msg().get(p, "admin.usage") + " /quest lang <en|ko>");
+            return;
+        }
+
+        String targetLang = a[1].toLowerCase(Locale.ROOT);
+        if (plugin.msg().getAvailableLanguages().contains(targetLang)) {
+            // PlayerData에 언어 설정 저장
+            plugin.progress().of(p.getUniqueId(), p.getName()).setLanguage(targetLang);
+            p.sendMessage(plugin.msg().get(p, "language_changed").replace("%lang%", targetLang.toUpperCase()));
+        } else {
+            p.sendMessage("§cInvalid language. Available: " + plugin.msg().getAvailableLanguages());
+        }
+    }
+
     private boolean msg(Player p, String key) {
-        p.sendMessage(plugin.msg().get(key));
+        p.sendMessage(plugin.msg().get(p, key));
         return true;
     }
 
     private void showPoints(Player p) {
-        CompletableFuture.supplyAsync(() -> plugin.engine().progress().getPoints(p.getUniqueId()), plugin.engine().asyncPool())
+        CompletableFuture.supplyAsync(() -> plugin.progress().getPoints(p.getUniqueId()), plugin.engine().asyncPool())
                 .thenAccept(points -> Bukkit.getScheduler().runTask(plugin, () ->
-                        p.sendMessage(plugin.msg().get("list_header") + "§f " +
-                                plugin.msg().get("list.points").replace("%points%", String.valueOf(points)))
+                        p.sendMessage(plugin.msg().get(p, "list_header") + "\n" +
+                                plugin.msg().get(p, "gui.list.points").replace("%points%", String.valueOf(points)))
                 ));
     }
 
     @Override
     public List<String> onTabComplete(CommandSender s, Command c, String l, String[] a) {
         if (a.length == 1) {
-            return StringUtil.copyPartialMatches(a[0], SUBS, new ArrayList<>(SUBS.size()));
+            return StringUtil.copyPartialMatches(a[0], SUBS, new ArrayList<>());
         }
-        if (a.length == 2 && ("start".equalsIgnoreCase(a[0]) || "cancel".equalsIgnoreCase(a[0]))) {
-            Collection<String> ids = plugin.engine().quests().ids();
-            return StringUtil.copyPartialMatches(a[1], ids, new ArrayList<>(ids.size()));
+        if (a.length == 2) {
+            String sub = a[0].toLowerCase(Locale.ROOT);
+            if (sub.equals("start") || sub.equals("cancel")) {
+                return StringUtil.copyPartialMatches(a[1], plugin.engine().quests().ids(), new ArrayList<>());
+            }
+            if (sub.equals("lang")) {
+                return StringUtil.copyPartialMatches(a[1], plugin.msg().getAvailableLanguages(), new ArrayList<>());
+            }
         }
         return Collections.emptyList();
     }

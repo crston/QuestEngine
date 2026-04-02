@@ -15,11 +15,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
-/**
- * ChatInput (Optimized)
- * - Memory Leak Fix: 플레이어 퇴장 시 대기 목록에서 제거
- * - Thread Safety: ConcurrentHashMap 활용
- */
 public final class ChatInput implements Listener {
 
     private static ChatInput INSTANCE;

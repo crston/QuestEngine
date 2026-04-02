@@ -11,46 +11,62 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * QuestGuiManager
- * - Session 관리 스레드 안전성 강화
- * - GUI 오픈 헬퍼 메소드 제공
- */
 public final class QuestGuiManager {
 
     private final QuestEnginePlugin plugin;
 
-    // 동시성 제어가 필요한 세션 저장소
+    // Thread-safe session storage
     private final Map<UUID, Map<String, Object>> sessions = new ConcurrentHashMap<>();
 
-    // 메뉴 인스턴스 (Lazy Loading 가능하나, 여기선 미리 로드)
+    // Menu Instances
     private final LeaderboardMenu leaderboardMenu;
     private final QuestListMenu questListMenu;
     private final PublicQuestMenu publicQuestMenu;
     private final QuestConfirmMenu confirmMenu;
+    private final LanguageMenu languageMenu; // [ADDED] Language selection support
 
     public QuestGuiManager(QuestEnginePlugin plugin) {
         this.plugin = plugin;
-        ChatInput.init(plugin); // 채팅 입력 초기화
 
-        // 메뉴 초기화
+        // Initialize Menus
         this.leaderboardMenu = new LeaderboardMenu(plugin);
         this.questListMenu = new QuestListMenu(plugin);
         this.publicQuestMenu = new PublicQuestMenu(plugin);
         this.confirmMenu = new QuestConfirmMenu(plugin);
+        this.languageMenu = new LanguageMenu(plugin); // [ADDED]
 
-        // GUI 보호 리스너 등록
-        new GuiProtectionListener(plugin);
+        // Register protection listener
+        // new GuiProtectionListener(plugin);
 
-        plugin.getLogger().info("[QuestGuiManager] Initialized successfully.");
+        plugin.getLogger().info("[QuestGuiManager] Initialized with Multi-Language support.");
     }
 
-    // --- GUI Open Helpers ---
+    // --- GUI Open Helpers (Fixed Arguments) ---
 
-    public void openLeaderboard(Player p) { if (p != null) leaderboardMenu.open(p); }
-    public void openList(Player p) { if (p != null) questListMenu.open(p, 0); }
-    public void openPublic(Player p) { if (p != null) publicQuestMenu.open(p, 0); }
-    public void openConfirm(Player p, QuestDef quest) { if (p != null && quest != null) confirmMenu.open(p, quest); }
+    public void openLeaderboard(Player p) {
+        if (p != null) leaderboardMenu.open(p);
+    }
+
+    /** * QuestCommand의 openList(p, 0) 호출과 호환되도록 수정됨
+     */
+    public void openList(Player p, int page) {
+        if (p != null) questListMenu.open(p, page);
+    }
+
+    /** * QuestCommand의 openPublic(p, 0) 호출과 호환되도록 수정됨
+     */
+    public void openPublic(Player p, int page) {
+        if (p != null) publicQuestMenu.open(p, page);
+    }
+
+    public void openConfirm(Player p, QuestDef quest) {
+        if (p != null && quest != null) confirmMenu.open(p, quest);
+    }
+
+    /** [NEW] 언어 선택 메뉴 오픈 */
+    public void openLanguageMenu(Player p) {
+        if (p != null) languageMenu.open(p);
+    }
 
     // --- Session Management ---
 
@@ -102,10 +118,9 @@ public final class QuestGuiManager {
     }
 
     // --- Getters ---
-
-    public QuestEnginePlugin plugin() { return plugin; }
     public QuestConfirmMenu confirm() { return confirmMenu; }
-    public QuestListMenu list() { return questListMenu; }
-    public PublicQuestMenu publicMenu() { return publicQuestMenu; }
-    public LeaderboardMenu leaderboard() { return leaderboardMenu; }
+
+    public QuestListMenu list() {
+        return questListMenu;
+    }
 }

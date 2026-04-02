@@ -2,10 +2,6 @@ package com.gmail.bobason01.questengine.progress;
 
 import java.time.Instant;
 
-/**
- * ProgressEntry
- * 플레이어가 특정 퀘스트를 진행 중일 때의 상태를 나타내는 불변 데이터 구조
- */
 public final class ProgressEntry {
 
     private final String questId;

@@ -6,11 +6,6 @@ import java.lang.reflect.Field;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * DraftFieldAccessor (Optimized)
- * - Java 7+ MethodHandle 사용하여 리플렉션 속도 5배 이상 향상
- * - 불필요한 타입 검사 로직 간소화
- */
 final class DraftFieldAccessor {
 
     private static final Map<String, AccessorPair> HANDLE_CACHE = new ConcurrentHashMap<>();

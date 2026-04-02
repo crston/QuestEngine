@@ -21,7 +21,6 @@ import java.util.regex.Pattern;
 public final class QuestConfirmMenu implements Listener {
 
     private final QuestEnginePlugin plugin;
-    // Hex 색상 패턴 (Engine과 동일)
     private static final Pattern HEX_PATTERN = Pattern.compile("&#([A-Fa-f0-9]{6})");
 
     public QuestConfirmMenu(QuestEnginePlugin plugin) {
@@ -34,19 +33,17 @@ public final class QuestConfirmMenu implements Listener {
 
         String qName = q.name != null ? q.name : q.id;
 
-        // 제목에도 포맷팅 적용 (Hex + & 코드 지원)
-        String rawTitle = plugin.msg().get("gui.confirm.title").replace("%quest%", qName);
+        // [FIX] Msg.get(p, path)로 플레이어 인자 추가
+        String rawTitle = plugin.msg().get(p, "gui.confirm.title").replace("%quest%", qName);
         String title = format(p, rawTitle);
 
         Inventory inv = Bukkit.createInventory(new GuiHolder("Q_CONFIRM"), 27, title);
-        ((GuiHolder) inv.getHolder()).setInventory(inv);
 
-        // 버튼들은 이미 § 코드를 쓰고 있어서 문제없지만, 혹시 모르니 format 적용
+        // 버튼 텍스트 다국어화 (필요시 messages.yml에 키 추가)
         inv.setItem(11, icon(Material.LIME_WOOL, format(p, "&aYES")));
         inv.setItem(15, icon(Material.RED_WOOL, format(p, "&cNO")));
 
         plugin.gui().putSession(p, "confirm_target", q);
-
         p.openInventory(inv);
     }
 
@@ -55,69 +52,60 @@ public final class QuestConfirmMenu implements Listener {
         if (!(e.getInventory().getHolder() instanceof GuiHolder gh)) return;
         if (!"Q_CONFIRM".equals(gh.id())) return;
 
+        e.setCancelled(true);
         if (!(e.getWhoClicked() instanceof Player p)) return;
+
         QuestDef q = (QuestDef) plugin.gui().getSession(p, "confirm_target");
         if (q == null) return;
 
-        e.setCancelled(true);
-
         int slot = e.getRawSlot();
 
-        int backPage;
+        // 이전 페이지 번호 가져오기
+        int backPage = 0;
         Object bp = plugin.gui().getSession(p, "confirm_back_page");
         if (bp instanceof Integer i) backPage = i;
-        else {
-            backPage = 0;
-        }
 
-        if (slot == 11) {
-            plugin.engine().cancelQuest(p, q.id);
+        if (slot == 11) { // YES: 퀘스트 포기
+            plugin.engine().cancelQuest(p, q);
 
-            String msg = plugin.msg().get("gui.confirm.cancel_done")
+            // [FIX] Msg.get(p, path)로 플레이어 인자 추가
+            String msgStr = plugin.msg().get(p, "gui.confirm.cancel_done")
                     .replace("%quest%", q.name != null ? q.name : q.id);
-            p.sendMessage(format(p, msg));
+            p.sendMessage(format(p, msgStr));
 
-            Bukkit.getScheduler().runTask(plugin, () -> plugin.gui().openList(p));
-            Bukkit.getScheduler().runTask(plugin, () -> plugin.gui().list().open(p, backPage));
+            int finalBackPage = backPage;
+            Bukkit.getScheduler().runTask(plugin, () -> plugin.gui().list().open(p, finalBackPage));
             return;
         }
 
-        if (slot == 15) {
-            Bukkit.getScheduler().runTask(plugin, () -> plugin.gui().list().open(p, backPage));
+        if (slot == 15) { // NO: 돌아가기
+            int finalBackPage = backPage;
+            Bukkit.getScheduler().runTask(plugin, () -> plugin.gui().list().open(p, finalBackPage));
         }
     }
 
     @EventHandler
     public void onDrag(InventoryDragEvent e) {
-        if (!(e.getInventory().getHolder() instanceof GuiHolder gh)) return;
-        if (!"Q_CONFIRM".equals(gh.id())) return;
-
-        for (int slot : e.getRawSlots()) {
-            if (slot < e.getInventory().getSize()) {
-                e.setCancelled(true);
-                return;
-            }
+        if (e.getInventory().getHolder() instanceof GuiHolder gh && "Q_CONFIRM".equals(gh.id())) {
+            e.setCancelled(true);
         }
     }
 
     private ItemStack icon(Material m, String name) {
         ItemStack it = new ItemStack(m);
         ItemMeta im = it.getItemMeta();
-        im.setDisplayName(name); // 이미 포맷팅된 문자열을 받음
-        it.setItemMeta(im);
+        if (im != null) {
+            im.setDisplayName(name);
+            it.setItemMeta(im);
+        }
         return it;
     }
 
-    // Engine 클래스와 동일한 포맷팅 헬퍼
     private String format(Player p, String raw) {
         if (raw == null) return "";
-
-        // PAPI 지원 (플러그인이 설치된 경우)
         if (Bukkit.getPluginManager().isPluginEnabled("PlaceholderAPI") && p != null) {
             raw = PlaceholderAPI.setPlaceholders(p, raw);
         }
-
-        // Hex 처리
         Matcher matcher = HEX_PATTERN.matcher(raw);
         StringBuffer buffer = new StringBuffer(raw.length());
         while (matcher.find()) {
@@ -127,9 +115,6 @@ public final class QuestConfirmMenu implements Listener {
                     "§" + group.charAt(4) + "§" + group.charAt(5));
         }
         matcher.appendTail(buffer);
-        raw = buffer.toString();
-
-        // & 코드 처리
-        return ChatColor.translateAlternateColorCodes('&', raw);
+        return ChatColor.translateAlternateColorCodes('&', buffer.toString());
     }
 }

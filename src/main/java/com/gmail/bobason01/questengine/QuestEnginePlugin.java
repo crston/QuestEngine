@@ -5,6 +5,7 @@ import com.gmail.bobason01.questengine.command.QuestAdminCommand;
 import com.gmail.bobason01.questengine.command.QuestCommand;
 import com.gmail.bobason01.questengine.command.QuestEditorCommand;
 import com.gmail.bobason01.questengine.command.QuestEngineCommand;
+import com.gmail.bobason01.questengine.gui.ChatInput;
 import com.gmail.bobason01.questengine.gui.QuestGuiManager;
 import com.gmail.bobason01.questengine.gui.editor.QuestEditorMenu;
 import com.gmail.bobason01.questengine.party.PartyHook;
@@ -29,13 +30,6 @@ import java.util.concurrent.Executors;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 
-/**
- * QuestEnginePlugin
- * - ProgressRepository API 변경 대응 of 사용
- * - EventDispatcher 통합으로 인한 중복 리스너 등록 제거
- * - 스레드 풀 및 리소스 정리 최적화
- * - 퀘스트 폴더 존재 여부에 따른 초기화 로직 변경
- */
 public final class QuestEnginePlugin extends JavaPlugin {
 
     private Engine engine;
@@ -52,15 +46,13 @@ public final class QuestEnginePlugin extends JavaPlugin {
         long start = System.currentTimeMillis();
         getLogger().info("[QuestEngine] Initializing...");
 
-        // 1. Config & Message
+        // 1. Config & Language Files Setup
         saveDefaultConfig();
+        setupLanguageFiles();
         msg = new Msg(this);
 
         // 2. Quest Folder Setup
-        // 폴더가 존재하지 않는 경우에만 생성하고 기본 퀘스트 파일을 추출합니다
-        // 이미 폴더가 존재하면 아무 작업도 하지 않습니다
         File questDir = new File(getDataFolder(), getConfig().getString("quests.folder", "quests"));
-
         if (!questDir.exists()) {
             if (questDir.mkdirs()) {
                 getLogger().info("[QuestEngine] Quests folder created. Extracting defaults...");
@@ -69,18 +61,14 @@ public final class QuestEnginePlugin extends JavaPlugin {
                 } catch (Exception e) {
                     getLogger().warning("[QuestEngine] Failed to extract default quests: " + e.getMessage());
                 }
-            } else {
-                getLogger().warning("[QuestEngine] Failed to create quest folder: " + questDir.getAbsolutePath());
             }
-        } else {
-            getLogger().info("[QuestEngine] Quests folder found. Skipping default generation.");
         }
 
         // 3. Core Components Init
         quests = new QuestRepository(this, questDir);
         progress = new ProgressRepository(this);
 
-        // 4. Thread Pool CPU Core 기반 최적화
+        // 4. Thread Pool (Async Operations)
         asyncPool = Executors.newFixedThreadPool(
                 Math.max(2, Runtime.getRuntime().availableProcessors()),
                 r -> {
@@ -94,17 +82,10 @@ public final class QuestEnginePlugin extends JavaPlugin {
 
         // 5. Preload Online Players
         for (Player p : Bukkit.getOnlinePlayers()) {
-            try {
-                // preload 대신 of 메서드 사용 데이터 로드 및 캐싱
-                progress.of(p.getUniqueId(), p.getName());
-                getLogger().info("[QuestEngine] Cached progress for " + p.getName());
-            } catch (Throwable t) {
-                getLogger().warning("[QuestEngine] Failed to load data for " + p.getName() + ": " + t.getMessage());
-            }
+            progress.of(p.getUniqueId(), p.getName());
         }
 
-        // 6. Event Listeners 지연 등록
-        // 별도의 Bridge 클래스 등록 제거 EventDispatcher 내부 처리
+        // 6. Event Listeners Registration
         Bukkit.getScheduler().runTask(this, () -> {
             try {
                 new EventDispatcher(this, engine);
@@ -115,19 +96,16 @@ public final class QuestEnginePlugin extends JavaPlugin {
             }
         });
 
-        // 7. Hooks
+        // 7. Hooks (Party & PAPI)
         PartyHook.init(this, getConfig());
-
         if (Bukkit.getPluginManager().isPluginEnabled("PlaceholderAPI")) {
-            try {
-                new QuestPapiExpansion(this).register();
-                getLogger().info("[QuestEngine] PlaceholderAPI expansion registered.");
-            } catch (Throwable t) {
-                getLogger().warning("[QuestEngine] PlaceholderAPI registration failed: " + t.getMessage());
-            }
+            new QuestPapiExpansion(this).register();
         }
 
-        // 8. GUI & Commands
+        // 8. Chat & GUI & Commands Init
+        // [IMPORTANT] ChatInput MUST be initialized here to capture chat input!
+        ChatInput.init(this);
+
         gui = new QuestGuiManager(this);
         editorMenu = new QuestEditorMenu(this);
 
@@ -143,31 +121,38 @@ public final class QuestEnginePlugin extends JavaPlugin {
     @Override
     public void onDisable() {
         getLogger().info("[QuestEngine] Shutting down...");
-
         try {
-            // 이벤트 리스너 해제
             HandlerList.unregisterAll(this);
-
-            // 엔진 종료
             if (engine != null) engine.shutdown();
-
-            // 데이터 저장 및 DB 연결 종료
             if (progress != null) progress.close();
-
-            // 스레드 풀 강제 종료
-            if (asyncPool != null && !asyncPool.isShutdown()) {
-                asyncPool.shutdownNow();
-            }
-
+            if (asyncPool != null && !asyncPool.isShutdown()) asyncPool.shutdownNow();
+            ChatInput.clearAll();
         } catch (Throwable t) {
             getLogger().warning("[QuestEngine] Exception during shutdown: " + t.getMessage());
         }
+    }
 
-        getLogger().info("[QuestEngine] Disabled safely.");
+    /**
+     * 전체 리로드 (설정, 퀘스트 데이터, 언어 파일)
+     */
+    public void reloadAll() {
+        reloadConfig();
+        quests.reload();
+        msg.reload();
+        engine.refreshEventCache();
+        getLogger().info("[QuestEngine] All components reloaded successfully.");
+    }
+
+    private void setupLanguageFiles() {
+        File langDir = new File(getDataFolder(), "lang");
+        if (!langDir.exists()) {
+            langDir.mkdirs();
+            saveResource("lang/en.yml", false);
+            saveResource("lang/ko.yml", false);
+        }
     }
 
     // --- Accessors ---
-
     public Engine engine() { return engine; }
     public QuestRepository quests() { return quests; }
     public ProgressRepository progress() { return progress; }
@@ -176,26 +161,15 @@ public final class QuestEnginePlugin extends JavaPlugin {
     public ExecutorService asyncPool() { return asyncPool; }
     public QuestEditorMenu editorMenu() { return editorMenu; }
 
-    // 비동기 작업 헬퍼
     public void runAsync(Runnable task) {
-        if (asyncPool == null || asyncPool.isShutdown()) {
-            getLogger().warning("[QuestEngine] Async pool not available, running sync.");
-            task.run();
-            return;
-        }
-        asyncPool.submit(task);
+        if (asyncPool != null && !asyncPool.isShutdown()) asyncPool.submit(task);
     }
-
-    // --- Internal Helpers ---
 
     private void copyDefaultQuests(File questDir) throws Exception {
         File jarFile;
         try {
             jarFile = new File(getClass().getProtectionDomain().getCodeSource().getLocation().toURI());
-        } catch (URISyntaxException e) {
-            getLogger().warning("[QuestEngine] Could not locate plugin JAR.");
-            return;
-        }
+        } catch (URISyntaxException e) { return; }
 
         try (JarFile jar = new JarFile(jarFile)) {
             var entries = jar.entries();
@@ -205,11 +179,9 @@ public final class QuestEnginePlugin extends JavaPlugin {
                 if (!name.startsWith("quests/") || !name.endsWith(".yml")) continue;
 
                 String fileName = name.substring("quests/".length());
-                if (fileName.isEmpty()) continue; // 폴더 자체인 경우 스킵
+                if (fileName.isEmpty()) continue;
 
                 File outFile = new File(questDir, fileName);
-                // 이미 존재하면 덮어쓰지 않지만 상위 로직에서 폴더가 없을 때만 호출하므로
-                // 사실상 새 폴더에 파일들을 생성하는 역할만 수행하게 됩니다
                 if (outFile.exists()) continue;
 
                 try (InputStream in = jar.getInputStream(entry);
@@ -217,9 +189,6 @@ public final class QuestEnginePlugin extends JavaPlugin {
                     byte[] buf = new byte[4096];
                     int len;
                     while ((len = in.read(buf)) > 0) out.write(buf, 0, len);
-                    getLogger().info("[QuestEngine] Extracted default quest: " + fileName);
-                } catch (Throwable t) {
-                    getLogger().warning("[QuestEngine] Failed to copy quest " + fileName + ": " + t.getMessage());
                 }
             }
         }
