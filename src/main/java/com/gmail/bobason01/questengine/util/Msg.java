@@ -44,7 +44,7 @@ public final class Msg {
     }
 
     /**
-     * [1] 특정 플레이어의 언어 설정에 맞는 메시지를 가져옵니다. (가장 일반적인 사용)
+     * 특정 플레이어의 언어 설정에 맞는 메시지를 가져옵니다.
      */
     public String get(Player p, String path) {
         String lang = plugin.progress().of(p.getUniqueId(), p.getName()).getLanguage();
@@ -52,8 +52,7 @@ public final class Msg {
     }
 
     /**
-     * [2] 인자가 1개일 때 호출됨 (QuestEditorMenu 등에서 사용)
-     * 시스템 기본 언어를 기준으로 메시지를 반환합니다.
+     * 시스템 기본 언어를 기준으로 메시지를 반환합니다. (에디터 등에서 사용)
      */
     public String get(String path) {
         String defLang = plugin.getConfig().getString("default-language", "en");
@@ -61,32 +60,35 @@ public final class Msg {
     }
 
     /**
-     * [3] 인자가 2개이고 모두 문자열일 때 호출됨 (QuestEditorMenu 헬퍼 대응)
-     * 키가 없을 경우 지정된 기본값(def)을 반환합니다.
+     * 키가 없을 경우 지정된 기본값(def)을 반환하며 색상을 입힙니다.
      */
     public String get(String path, String def) {
         String defLang = plugin.getConfig().getString("default-language", "en");
         YamlConfiguration config = langFiles.getOrDefault(defLang, langFiles.get("en"));
 
         if (config == null || !config.contains(path)) {
-            return ChatColor.translateAlternateColorCodes('&', def);
+            return color(def);
         }
 
-        return ChatColor.translateAlternateColorCodes('&', config.getString(path, def));
+        return color(config.getString(path, def));
     }
 
     /**
      * 특정 언어 코드와 경로로 메시지를 가져오는 핵심 로직입니다.
+     * [보완] 최후의 보루인 path 반환 시에도 color()를 입혔습니다.
      */
     public String getRaw(String langCode, String path) {
         String defLang = plugin.getConfig().getString("default-language", "en");
         YamlConfiguration config = langFiles.getOrDefault(langCode, langFiles.get(defLang));
 
         if (config == null) config = langFiles.get("en");
-        if (config == null) return path; // 최후의 보루: 키 이름 그대로 반환
 
+        // 파일 자체가 없거나 읽지 못했다면 path 자체에 색상을 입혀 반환
+        if (config == null) return color(path);
+
+        // 파일에 키가 없으면 path(기본값)를 가져오고 색상을 입힘
         String msg = config.getString(path, path);
-        return ChatColor.translateAlternateColorCodes('&', msg);
+        return color(msg);
     }
 
     /**
@@ -100,7 +102,7 @@ public final class Msg {
             prefix = "&7[&aQuestEngine&7] ";
         }
 
-        return ChatColor.translateAlternateColorCodes('&', prefix + getRaw(lang, path));
+        return color(prefix + getRaw(lang, path));
     }
 
     /**
@@ -111,7 +113,7 @@ public final class Msg {
         String prefix = getRaw(defLang, "prefix");
         if (prefix.equalsIgnoreCase("prefix")) prefix = "&7[&aQuestEngine&7] ";
 
-        return ChatColor.translateAlternateColorCodes('&', prefix + getRaw(defLang, path));
+        return color(prefix + getRaw(defLang, path));
     }
 
     /**
@@ -123,7 +125,7 @@ public final class Msg {
     }
 
     /**
-     * 플레이어 인자 없이 리스트를 가져올 때 사용 (기본 언어 기준)
+     * 플레이어 인자 없이 리스트를 가져올 때 사용합니다.
      */
     public List<String> list(String path) {
         String defLang = plugin.getConfig().getString("default-language", "en");
@@ -137,17 +139,30 @@ public final class Msg {
         List<String> raw = config.getStringList(path);
         List<String> colored = new ArrayList<>();
         for (String s : raw) {
-            colored.add(ChatColor.translateAlternateColorCodes('&', s));
+            colored.add(color(s));
         }
         return colored;
     }
 
     /**
-     * 문자열에 컬러 코드를 입힙니다.
+     * 문자열에 컬러 코드를 입힙니다. (& -> ChatColor)
      */
     public String color(String text) {
         if (text == null) return "";
         return ChatColor.translateAlternateColorCodes('&', text);
+    }
+
+    /**
+     * PAPI 변수를 치환하고 컬러 코드를 입혀서 반환합니다.
+     */
+    public String parse(Player p, String text) {
+        if (text == null) return "";
+        String result = color(text.replace("%player%", p.getName()));
+
+        if (org.bukkit.Bukkit.getPluginManager().isPluginEnabled("PlaceholderAPI")) {
+            return me.clip.placeholderapi.PlaceholderAPI.setPlaceholders(p, result);
+        }
+        return result;
     }
 
     public List<String> getAvailableLanguages() {
