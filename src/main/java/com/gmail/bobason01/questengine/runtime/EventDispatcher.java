@@ -11,11 +11,7 @@ import org.bukkit.event.enchantment.EnchantItemEvent;
 import org.bukkit.event.entity.*;
 import org.bukkit.event.inventory.*;
 import org.bukkit.event.player.*;
-import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.plugin.Plugin;
-
-import java.util.HashMap;
-import java.util.Map;
 
 public final class EventDispatcher implements Listener {
 
@@ -25,12 +21,8 @@ public final class EventDispatcher implements Listener {
         this.engine = engine;
         Bukkit.getPluginManager().registerEvents(this, plugin);
 
-        if (Bukkit.getPluginManager().isPluginEnabled("Citizens")) {
-            Bukkit.getPluginManager().registerEvents(new CitizensListener(engine), plugin);
-        }
-        if (Bukkit.getPluginManager().isPluginEnabled("MythicMobs")) {
-            Bukkit.getPluginManager().registerEvents(new MythicMobsListener(engine), plugin);
-        }
+        // NPC 상호작용 관련 리스너는 각 브릿지 클래스(CitizensNpcInteractBridge 등)에서
+        // 개별적으로 등록하므로 여기서 등록하는 중복된 내부 클래스는 제거되었습니다.
     }
 
     private void handle(Player player, String key, Event event) {
@@ -66,7 +58,14 @@ public final class EventDispatcher implements Listener {
     }
 
     @EventHandler public void onJoin(PlayerJoinEvent e) { handle(e.getPlayer(), "PLAYER_PRE_JOIN", e); }
-    @EventHandler public void onQuit(PlayerQuitEvent e) { handle(e.getPlayer(), "PLAYER_LEAVE", e); }
+
+    @EventHandler
+    public void onQuit(PlayerQuitEvent e) {
+        handle(e.getPlayer(), "PLAYER_LEAVE", e);
+        // [NEW] 유저 퇴장 시 Engine에 쌓이는 캐시(Memory Leak 방지용) 삭제
+        engine.cleanupPlayer(e.getPlayer().getUniqueId());
+    }
+
     @EventHandler public void onRespawn(PlayerRespawnEvent e) { handle(e.getPlayer(), "PLAYER_RESPAWN", e); }
     @EventHandler public void onDeath(PlayerDeathEvent e) { handle(e.getEntity(), "PLAYER_DEATH", e); }
     @EventHandler public void onTeleport(PlayerTeleportEvent e) { handle(e.getPlayer(), "PLAYER_TELEPORT", e); }
@@ -120,7 +119,6 @@ public final class EventDispatcher implements Listener {
     @EventHandler(ignoreCancelled = true)
     public void onCure(EntityTransformEvent e) {
         if (e.getTransformReason() == EntityTransformEvent.TransformReason.CURED) {
-            // 주변 플레이어 탐색 필요 (Curing 직접 이벤트에 플레이어 없음)
             for (Entity near : e.getEntity().getNearbyEntities(10, 10, 10)) {
                 if (near instanceof Player p) handle(p, "CURING", e);
             }
@@ -186,7 +184,7 @@ public final class EventDispatcher implements Listener {
 
     @EventHandler(ignoreCancelled = true)
     public void onMilk(PlayerBucketFillEvent e) {
-        if (e.getBlockClicked() != null && e.getBlockClicked().getType() == Material.AIR) { // 소 클릭 체크
+        if (e.getBlockClicked() != null && e.getBlockClicked().getType() == Material.AIR) {
             handle(e.getPlayer(), "MILKING", e);
         }
     }
@@ -207,7 +205,6 @@ public final class EventDispatcher implements Listener {
 
     @EventHandler(ignoreCancelled = true)
     public void onBarter(PiglinBarterEvent e) {
-        // 주변 플레이어에게 바터링 이벤트 전송
         for (Entity near : e.getEntity().getNearbyEntities(10, 10, 10)) {
             if (near instanceof Player p) handle(p, "PLAYER_BARTERING", e);
         }
@@ -218,66 +215,6 @@ public final class EventDispatcher implements Listener {
         handle(e.getPlayer(), "ITEM_INTERACT", e);
         if (e.getAction() == Action.RIGHT_CLICK_BLOCK) {
             handle(e.getPlayer(), "FARMING", e);
-        }
-    }
-
-    @EventHandler(ignoreCancelled = true)
-    public void onEntityInteractMain(PlayerInteractEntityEvent e) {
-        if (e.getHand() != EquipmentSlot.HAND) return;
-        Entity target = e.getRightClicked();
-        if (target.hasMetadata("NPC") || target.hasMetadata("MythicMob")) return;
-
-        Map<String, Object> ctx = new HashMap<>();
-        ctx.put("target_id", target.getType().name());
-        engine.handleCustom(e.getPlayer(), "ENTITY_INTERACT", ctx);
-    }
-
-    // --- INNER CLASSES (HOOKS) ---
-
-    private static class CitizensListener implements Listener {
-        private final Engine engine;
-        CitizensListener(Engine engine) { this.engine = engine; }
-
-        @EventHandler(ignoreCancelled = true)
-        public void onNpcInteract(PlayerInteractEntityEvent e) {
-            if (e.getHand() != EquipmentSlot.HAND) return;
-            Entity target = e.getRightClicked();
-            if (!target.hasMetadata("NPC")) return;
-            net.citizensnpcs.api.npc.NPC npc = net.citizensnpcs.api.CitizensAPI.getNPCRegistry().getNPC(target);
-            if (npc == null) return;
-
-            Map<String, Object> ctx = new HashMap<>();
-            ctx.put("target_id", "CITIZENS_" + npc.getId());
-            engine.handleCustom(e.getPlayer(), "ENTITY_INTERACT", ctx);
-        }
-    }
-
-    private static class MythicMobsListener implements Listener {
-        private final Engine engine;
-        private final io.lumine.mythic.bukkit.BukkitAPIHelper api = new io.lumine.mythic.bukkit.BukkitAPIHelper();
-        MythicMobsListener(Engine engine) { this.engine = engine; }
-
-        @EventHandler(ignoreCancelled = true)
-        public void onMythicDeath(io.lumine.mythic.bukkit.events.MythicMobDeathEvent e) {
-            if (e.getKiller() instanceof Player p) engine.handle(p, "MYTHICMOBS_ENTITY_KILL", e);
-        }
-
-        @EventHandler(ignoreCancelled = true)
-        public void onMythicSpawn(io.lumine.mythic.bukkit.events.MythicMobSpawnEvent e) {
-            engine.handle(null, "MYTHICMOBS_ENTITY_SPAWN", e);
-        }
-
-        @EventHandler(ignoreCancelled = true)
-        public void onInteract(PlayerInteractEntityEvent e) {
-            if (e.getHand() != EquipmentSlot.HAND) return;
-            if (api.isMythicMob(e.getRightClicked())) {
-                io.lumine.mythic.core.mobs.ActiveMob am = api.getMythicMobInstance(e.getRightClicked());
-                if (am != null) {
-                    Map<String, Object> ctx = new HashMap<>();
-                    ctx.put("target_id", "MYTHIC_" + am.getType().getInternalName());
-                    engine.handleCustom(e.getPlayer(), "ENTITY_INTERACT", ctx);
-                }
-            }
         }
     }
 }

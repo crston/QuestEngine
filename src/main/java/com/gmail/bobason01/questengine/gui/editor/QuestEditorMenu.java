@@ -31,6 +31,7 @@ public final class QuestEditorMenu implements Listener {
     private static final String HOLDER_LIST = "Q_EDITOR_LIST";
     private static final String HOLDER_EVENT = "Q_EDITOR_EVENT";
     private static final String HOLDER_CAPTURES = "Q_EDITOR_CAPTURES";
+    private static final String HOLDER_TEMPLATE = "Q_TEMPLATE:";
 
     private final QuestEnginePlugin plugin;
     private final Map<UUID, Session> sessions = new HashMap<>();
@@ -234,7 +235,7 @@ public final class QuestEditorMenu implements Listener {
                 inv.setItem(14, iconItem(p, d));
                 inv.setItem(16, textItem(p, "gui.editor.display.progress.label", d.displayProgress));
                 inv.setItem(19, numberItem(p, "gui.editor.display.cmd.label", d.displayCustomModelData));
-                inv.setItem(21, textItem(p, "gui.editor.display.hint.label", d.displayHint)); // 힌트 명령어 (Hint Command)
+                inv.setItem(21, textItem(p, "gui.editor.display.hint.label", d.displayHint));
                 inv.setItem(23, textItem(p, "gui.editor.display.reward.label", d.displayReward));
                 inv.setItem(25, textItem(p, "gui.editor.display.category.label", d.displayCategory));
                 inv.setItem(28, textItem(p, "gui.editor.display.difficulty.label", d.displayDifficulty));
@@ -340,6 +341,7 @@ public final class QuestEditorMenu implements Listener {
         else if (id.equals(HOLDER_EVENT)) handleEventSelectClick(player, e);
         else if (id.equals(HOLDER_CAPTURES)) handleCapturesClick(player, e);
         else if (id.startsWith("QEDITOR_QLIST_")) handleQuestListClick(player, e, id);
+        else if (id.startsWith(HOLDER_TEMPLATE)) handleTemplateClick(player, e, id);
     }
 
     private void handleMainClick(Player p, InventoryClickEvent e) {
@@ -378,7 +380,7 @@ public final class QuestEditorMenu implements Listener {
                 else if (slot == 14) promptOrClear(p, L, R, "BOOK", v -> { d.displayIcon = v.toUpperCase(Locale.ROOT); d.displayCustomModelData = -1; });
                 else if (slot == 16) promptOrClear(p, L, R, "&7%value%/%target%", v -> d.displayProgress = v);
                 else if (slot == 19 && L) { p.closeInventory(); ChatInput.await(p, m(p, "gui.editor.prompt.display_cmd"), (pl, v) -> { try { d.displayCustomModelData = Integer.parseInt(v.trim()); } catch(Exception ignored){d.displayCustomModelData=-1;} openMainDelayed(pl, sessions.get(pl.getUniqueId())); }); }
-                else if (slot == 21) { // 힌트 명령어 (Hint Command)
+                else if (slot == 21) {
                     p.closeInventory();
                     ChatInput.await(p, m(p, "gui.editor.prompt.display_hint"), (pl, v) -> {
                         d.displayHint = v;
@@ -450,8 +452,8 @@ public final class QuestEditorMenu implements Listener {
                 ChatInput.await(p, m(p, "gui.editor.prompt.list_edit").replace("%old%", old), (pl, v) -> { list.set(idx, v); openListDelayed(pl, key); });
             }
         } else if (idx == list.size()) {
-            p.closeInventory();
-            ChatInput.await(p, m(p, "gui.editor.prompt.list_add"), (pl, v) -> { list.add(v); openListDelayed(pl, key); });
+            openTemplateSelector(p, key);
+            plugin.gui().sound(p, "click");
         }
     }
 
@@ -527,7 +529,7 @@ public final class QuestEditorMenu implements Listener {
         all.sort(Comparator.comparing(q -> q.id));
         int maxPage = Math.max(1, (int) Math.ceil(all.size() / 45.0));
         page = Math.max(1, Math.min(page, maxPage));
-        String title = "§9Quest List - Page " + page;
+        String title = "Quest List - Page " + page;
         GuiHolder holder = new GuiHolder("QEDITOR_QLIST_" + page);
         Inventory inv = Bukkit.createInventory(holder, 54, title);
         holder.setInventory(inv);
@@ -537,10 +539,10 @@ public final class QuestEditorMenu implements Listener {
         int slot = 0;
         for (int i = start; i < end; i++) {
             QuestDef def = all.get(i);
-            inv.setItem(slot++, new ItemBuilder(Material.PAPER).setName("§f" + def.id).setLore(List.of("§7Click to edit")).build());
+            inv.setItem(slot++, new ItemBuilder(Material.PAPER).setName("§f" + def.id).setLore(List.of("Click to edit")).build());
         }
-        if (page > 1) inv.setItem(45, new ItemBuilder(Material.ARROW).setName("§ePrevious").build());
-        if (page < maxPage) inv.setItem(53, new ItemBuilder(Material.ARROW).setName("§eNext").build());
+        if (page > 1) inv.setItem(45, new ItemBuilder(Material.ARROW).setName("Previous").build());
+        if (page < maxPage) inv.setItem(53, new ItemBuilder(Material.ARROW).setName("Next").build());
         player.openInventory(inv);
     }
 
@@ -561,4 +563,90 @@ public final class QuestEditorMenu implements Listener {
     public void onInventoryDrag(InventoryDragEvent e) { if (e.getInventory().getHolder() instanceof GuiHolder h && h.id().startsWith("Q_EDITOR")) e.setCancelled(true); }
     @EventHandler
     public void onInventoryClose(InventoryCloseEvent e) {}
+
+    private void openTemplateSelector(Player p, String key) {
+        GuiHolder holder = new GuiHolder(HOLDER_TEMPLATE + key);
+        String title = m(p, "gui.editor.template.title");
+        Inventory inv = Bukkit.createInventory(holder, 36, title);
+
+        plugin.gui().fill(inv, new ItemStack(Material.GRAY_STAINED_GLASS_PANE));
+
+        if (key.startsWith("actions.")) {
+            inv.setItem(10, templateItem(p, m(p, "gui.editor.template.action.msg"), "msg{m=\"&aQuest Complete!\"} @self"));
+            inv.setItem(11, templateItem(p, m(p, "gui.editor.template.action.cmd"), "cmd{c=\"give %player% diamond 1\"} @server"));
+            inv.setItem(12, templateItem(p, m(p, "gui.editor.template.action.item"), "item{i=DIAMOND;a=1} @self"));
+            inv.setItem(13, templateItem(p, m(p, "gui.editor.template.action.title"), "title{t=\"&6Clear!\";s=\"&fGood job\"} @self"));
+            inv.setItem(14, templateItem(p, m(p, "gui.editor.template.action.sound"), "sound{s=ENTITY_PLAYER_LEVELUP;v=1;p=1} @self"));
+            inv.setItem(15, templateItem(p, m(p, "gui.editor.template.action.particle"), "particle{p=FLAME;a=20} @self"));
+            inv.setItem(16, templateItem(p, m(p, "gui.editor.template.action.potion"), "potion{t=SPEED;d=200;l=2} @self"));
+            inv.setItem(17, templateItem(p, m(p, "gui.editor.template.action.delay"), "delay 20t"));
+        } else if (key.startsWith("conditions.")) {
+            inv.setItem(10, templateItem(p, m(p, "gui.editor.template.cond.level"), "%player_level% >= 10"));
+            inv.setItem(11, templateItem(p, m(p, "gui.editor.template.cond.world"), "%player_world% == 'world_nether'"));
+            inv.setItem(12, templateItem(p, m(p, "gui.editor.template.cond.papi"), "%vault_eco_balance% >= 1000"));
+        } else if (key.equals("targets")) {
+            inv.setItem(10, templateItem(p, m(p, "gui.editor.template.target.all"), "*"));
+            inv.setItem(11, templateItem(p, m(p, "gui.editor.template.target.block"), "STONE"));
+            inv.setItem(12, templateItem(p, m(p, "gui.editor.template.target.mob"), "ZOMBIE"));
+            inv.setItem(13, templateItem(p, m(p, "gui.editor.template.target.mythic_kill"), "SkeletonKing"));
+            inv.setItem(14, templateItem(p, m(p, "gui.editor.template.target.citizens"), "CITIZENS:1"));
+            inv.setItem(15, templateItem(p, m(p, "gui.editor.template.target.mythic_interact"), "MYTHICMOBS:NPC_NAME"));
+            inv.setItem(16, templateItem(p, m(p, "gui.editor.template.target.vanilla_interact"), "ENTITY:COW"));
+            inv.setItem(19, templateItem(p, m(p, "gui.editor.template.target.command"), "spawn"));
+            inv.setItem(20, templateItem(p, m(p, "gui.editor.template.target.chat"), "hello"));
+            inv.setItem(21, templateItem(p, m(p, "gui.editor.template.target.multiple"), "ZOMBIE|SKELETON"));
+        } else {
+            inv.setItem(10, templateItem(p, m(p, "gui.editor.template.default"), "example_item"));
+        }
+
+        inv.setItem(26, templateItem(p, m(p, "gui.editor.template.custom_input"), "CUSTOM_INPUT"));
+        inv.setItem(35, new ItemBuilder(Material.BARRIER).setName(m(p, "gui.editor.template.cancel")).build());
+
+        p.openInventory(inv);
+    }
+
+    private ItemStack templateItem(Player p, String name, String template) {
+        return new ItemBuilder(Material.PAPER)
+                .setName(name)
+                .setLore(Arrays.asList(
+                        m(p, "gui.editor.template.lore.add"),
+                        "§f" + template,
+                        "",
+                        m(p, "gui.editor.template.lore.edit")
+                )).hideAllFlags().build();
+    }
+
+    private void handleTemplateClick(Player p, InventoryClickEvent e, String id) {
+        String key = id.substring(HOLDER_TEMPLATE.length());
+        Session s = sessions.get(p.getUniqueId());
+        if (s == null) return;
+        List<String> list = getListReference(s.draft, key);
+        if (list == null) return;
+
+        int slot = e.getRawSlot();
+        if (slot == 35) {
+            openListDelayed(p, key);
+            return;
+        }
+
+        ItemStack item = e.getCurrentItem();
+        if (item == null || item.getType() != Material.PAPER || !item.hasItemMeta()) return;
+
+        List<String> lore = item.getItemMeta().getLore();
+        if (lore == null || lore.size() < 2) return;
+
+        String template = ChatColor.stripColor(lore.get(1));
+
+        if (template.equals("CUSTOM_INPUT")) {
+            p.closeInventory();
+            ChatInput.await(p, m(p, "gui.editor.prompt.list_add"), (pl, v) -> {
+                list.add(v);
+                openListDelayed(pl, key);
+            });
+        } else {
+            list.add(template);
+            plugin.gui().sound(p, "success");
+            openListDelayed(p, key);
+        }
+    }
 }

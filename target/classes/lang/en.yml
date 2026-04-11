@@ -1,6 +1,5 @@
 prefix: "&7[&aQuestEngine&7] "
 
-# Language System
 language_changed: "&aLanguage has been changed to %lang%."
 language_selector_title: "&8Select Language"
 language_item_name: "&e%lang_name%"
@@ -24,18 +23,12 @@ quest_repeat_ready: "&6Quest '%quest_name%' is ready to repeat. Use /quest start
 quest_no_repeat: "&cThis quest is already completed and cannot be repeated."
 quest_locked: "&cCannot start quest. Prerequisite requirements not met."
 
-# ==========================================================
-# QUEST BOARD & CHAIN SYSTEM
-# ==========================================================
 quest_board_only: "&7This quest can only be accepted from the Quest Board."
 quest_board_repeat: "&e'%quest_name%' completed.&7 To repeat, accept the quest from the board again."
 quest_chain: "&a'%current%' completed. Chain quest &e%next%&a has started."
 quest_chain_board: "&a'%current%' completed. Chain quest &e%next%&a is now available on the board."
 quest_chain_end: "&aAll chained quests completed."
 
-# ==========================================================
-# ADMIN
-# ==========================================================
 admin:
   usage: "&7/questadmin <reload|give|complete|stop|reset|list|points|rank|lang>"
   reloaded: "&aAll quests reloaded!"
@@ -54,9 +47,6 @@ admin:
   rank_entry: "&7#%rank% &f%player% &8- &e%points% pts"
   no_data: "&7No ranking data available."
 
-# ==========================================================
-# GUI COMMON
-# ==========================================================
 gui:
   lore:
     list:
@@ -125,9 +115,6 @@ gui:
     rank_points: "&7Points: &a%points%"
     no_data: "&7No data available."
 
-  # ==========================================================
-  # QUEST EDITOR GUI
-  # ==========================================================
   editor:
     title:
       main: "&9Quest Editor - %tab%"
@@ -372,3 +359,31 @@ gui:
     save:
       ok: "&aQuest saved: %id%"
       fail: "&cSave failed: %msg%"
+    template:
+      title: "&9Select item to add"
+      action:
+        msg: "&eSend Message"
+        cmd: "&cExecute Command"
+        item: "&bGive Item"
+        delay: "&7Wait (Delay)"
+      cond:
+        level: "&eLevel Condition"
+        world: "&aWorld Condition"
+        papi: "&bPAPI Condition"
+      target:
+        all: "&eAllow All Targets"
+        block: "&7Break Vanilla Block"
+        mob: "&cKill Vanilla Mob"
+        mythic_kill: "&4Kill MythicMob"
+        citizens: "&aClick Citizens NPC"
+        mythic_interact: "&6Click MythicMob"
+        vanilla_interact: "&fClick Vanilla Entity"
+        command: "&bType Command"
+        chat: "&dType Chat"
+        multiple: "&8Multiple Targets"
+      default: "&eAdd Default Example"
+      custom_input: "&fEnter manually in chat"
+      cancel: "&cCancel and Go Back"
+      lore:
+        add: "&7Click to add the following:"
+        edit: "&8You can edit values after adding."

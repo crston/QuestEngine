@@ -114,7 +114,16 @@ public final class Engine {
 
     // --- Core Logic ---
 
-    // [NEW] Check required quests
+    // [NEW] 유저 퇴장 시 메모리 누수 방지용 캐시 정리 (추가됨)
+    public void cleanupPlayer(UUID uid) {
+        if (uid == null) return;
+        playerLocks.remove(uid);
+        recentEventWindow.remove(uid);
+        npcArm.remove(uid);
+        // conditionCache는 UUID별로 복잡하게 엮여있으므로 TTL에 의해 자연 소멸되거나, key가 uid로 시작하는 것을 지울 수 있습니다.
+        conditionCache.keySet().removeIf(k -> k.startsWith(uid.toString()));
+    }
+
     private boolean checkRequirements(UUID uid, String name, QuestDef def) {
         if (def.requiredQuests == null || def.requiredQuests.isEmpty()) return true;
         for (String reqId : def.requiredQuests) {
@@ -292,7 +301,6 @@ public final class Engine {
 
                     if (!progress.canStart(uid, name, def)) continue;
 
-                    // [NEW] Check requirements
                     if (!checkRequirements(uid, name, def)) continue;
 
                     if (!checkTargetMatch(actor, event, matcher, def)) continue;
@@ -394,19 +402,11 @@ public final class Engine {
             if (def.hasTarget() && !def.matchesTarget(targetId)) continue;
 
             if (!progress.canStart(uid, name, def) && !progress.isActive(uid, name, def.id)) continue;
-
-            // [NEW] Check requirements before candidate selection
             if (!checkRequirements(uid, name, def)) continue;
 
             candidate = def;
             break;
         }
-
-        // [UPDATE] If requirements not met, candidate might be null.
-        // Or we could have selected a candidate and then failed requirements,
-        // but here we filter candidates first.
-        // If user wants a "locked" message, we might need to find the quest even if requirements fail.
-        // For simplicity and performance, we just ignore if requirements fail.
 
         if (candidate == null) return;
 
@@ -428,7 +428,6 @@ public final class Engine {
 
         if (!active && !completed) {
             if (!progress.canStart(uid, name, candidate)) return;
-            // [NEW] Double check requirements just in case
             if (!checkRequirements(uid, name, candidate)) {
                 player.sendMessage(format(player, msg.pref("quest_locked")));
                 return;
@@ -463,7 +462,6 @@ public final class Engine {
         UUID uid = player.getUniqueId();
         String name = player.getName();
 
-        // [NEW] Check requirements
         if (!checkRequirements(uid, name, def)) {
             player.sendMessage(format(player, msg.pref("quest_locked")));
             return;
@@ -574,12 +572,10 @@ public final class Engine {
         if (nextId != null && !nextId.isEmpty()) {
             QuestDef next = quests.byId(nextId);
             if (next != null) {
-                // [NEW] Check requirements for next quest
                 if (checkRequirements(player.getUniqueId(), player.getName(), next)) {
                     player.sendMessage(format(player, msg.pref("quest_chain").replace("%current%", def.name).replace("%next%", next.name)));
                     startQuest(player, next);
                 } else {
-                    // requirement not met (unlikely if it's a direct chain, but possible if complex)
                     player.sendMessage(format(player, msg.pref("quest_locked")));
                 }
             }

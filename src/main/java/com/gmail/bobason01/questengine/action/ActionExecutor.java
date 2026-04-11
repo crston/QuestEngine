@@ -6,9 +6,13 @@ import me.clip.placeholderapi.PlaceholderAPI;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
+import org.bukkit.Particle;
+import org.bukkit.Sound;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.Plugin;
+import org.bukkit.potion.PotionEffect;
+import org.bukkit.potion.PotionEffectType;
 
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
@@ -26,36 +30,35 @@ public final class ActionExecutor {
     private final boolean mmo;
     private final boolean ia;
 
-    // --- Reflection Handles (MMOItems) ---
+    // Reflection Handles MMOItems
     private static MethodHandle mmoGetItemMH;
     private static MethodHandle mmoGetTypeMH;
-    private static Object mmoInstance; // MMOItems.plugin
+    private static Object mmoInstance;
 
-    // --- Reflection Handles (ItemsAdder) ---
-    private static MethodHandle iaGetInstanceMH; // CustomStack.getInstance
-    private static MethodHandle iaGetItemStackMH; // CustomStack.getItemStack
+    // Reflection Handles ItemsAdder
+    private static MethodHandle iaGetInstanceMH;
+    private static MethodHandle iaGetItemStackMH;
 
-    // --- Action Cache ---
-    // 키: "quest_id:action_type" (ex: "tutorial_quest:start")
+    // Action Cache
     private final Map<String, List<ActionEntry>> actionCache = new ConcurrentHashMap<>();
 
-    // 정규식: 키=값 파싱 (따옴표 지원)
+    // 파라미터 파싱용 정규식 따옴표 매칭 완벽 지원
     private static final Pattern PARAM_PATTERN = Pattern.compile("([a-zA-Z]+)=('([^']*)'|\"([^\"]*)\"|([^\\s,]+))");
 
-    private enum ActionType { MESSAGE, COMMAND, ITEM, UNKNOWN }
+    // 확장된 액션 타입들
+    private enum ActionType { MESSAGE, COMMAND, ITEM, TITLE, SOUND, PARTICLE, POTION, UNKNOWN }
     private enum Target { SELF, SERVER }
 
+    // 유연한 속성 처리를 위해 Map 기반으로 구조 업그레이드
     private static final class ActionEntry {
         final ActionType type;
-        final String data;   // 메시지 내용, 명령어, 아이템 ID 등
-        final int amount;    // 아이템 수량 등
-        final long delay;    // 딜레이 (틱)
-        final Target target; // 실행 대상
+        final Map<String, String> params;
+        final long delay;
+        final Target target;
 
-        ActionEntry(ActionType type, String data, int amount, long delay, Target target) {
+        ActionEntry(ActionType type, Map<String, String> params, long delay, Target target) {
             this.type = type;
-            this.data = data;
-            this.amount = amount;
+            this.params = params;
             this.delay = delay;
             this.target = target;
         }
@@ -74,66 +77,41 @@ public final class ActionExecutor {
         MethodHandles.Lookup lookup = MethodHandles.lookup();
         try {
             if (mmo) {
-                // net.Indyuce.mmoitems.MMOItems
                 Class<?> mmoClass = Class.forName("net.Indyuce.mmoitems.MMOItems");
-                // net.Indyuce.mmoitems.api.Type
                 Class<?> typeClass = Class.forName("net.Indyuce.mmoitems.api.Type");
-
-                // MMOItems.plugin (static field or method)
                 try {
                     mmoInstance = mmoClass.getField("plugin").get(null);
                 } catch (Throwable t) {
                     mmoInstance = mmoClass.getMethod("getInstance").invoke(null);
                 }
-
-                // Type.get(String) -> Type 객체 반환
                 Method getType = typeClass.getMethod("get", String.class);
                 mmoGetTypeMH = lookup.unreflect(getType);
-
-                // MMOItems.getItem(Type, String) -> ItemStack
                 Method getItem = mmoClass.getMethod("getItem", typeClass, String.class);
                 mmoGetItemMH = lookup.unreflect(getItem).bindTo(mmoInstance);
-
-                plugin.getLogger().info("[QuestEngine] MMOItems hook linked successfully.");
             }
         } catch (Throwable t) {
-            plugin.getLogger().warning("[QuestEngine] MMOItems hook failed: " + t.getMessage());
         }
 
         try {
             if (ia) {
-                // dev.lone.itemsadder.api.CustomStack
                 Class<?> csClass = Class.forName("dev.lone.itemsadder.api.CustomStack");
-
-                // CustomStack.getInstance(String) -> CustomStack
                 Method getInstance = csClass.getMethod("getInstance", String.class);
                 iaGetInstanceMH = lookup.unreflect(getInstance);
-
-                // CustomStack.getItemStack() -> ItemStack
                 Method getItemStack = csClass.getMethod("getItemStack");
                 iaGetItemStackMH = lookup.unreflect(getItemStack);
-
-                plugin.getLogger().info("[QuestEngine] ItemsAdder hook linked successfully.");
             }
         } catch (Throwable t) {
-            plugin.getLogger().warning("[QuestEngine] ItemsAdder hook failed: " + t.getMessage());
         }
     }
 
     public void runAll(QuestDef q, String type, Player p) {
         if (q == null || q.actions == null || p == null) return;
-
-        String cacheKey = q.id + ":" + type.toLowerCase(Locale.ROOT);
-
-        // 캐시 조회 혹은 컴파일
+        String cacheKey = q.id + type.toLowerCase(Locale.ROOT);
         List<ActionEntry> entries = actionCache.computeIfAbsent(cacheKey, k -> compileActions(q, type));
-
         if (entries.isEmpty()) return;
-
         executeEntries(entries, q, p);
     }
 
-    // 기존 호환성 유지
     public void run(QuestDef q, String type, Player p) {
         runAll(q, type, p);
     }
@@ -157,7 +135,7 @@ public final class ActionExecutor {
             String s = line.trim();
 
             Target target = Target.SELF;
-            if (s.toLowerCase(Locale.ROOT).endsWith("@server")) {
+            if (s.toLowerCase(Locale.ROOT).endsWith("server")) {
                 target = Target.SERVER;
                 s = s.substring(0, s.length() - 7).trim();
             }
@@ -188,25 +166,22 @@ public final class ActionExecutor {
         if (key.equals("msg") || key.equals("message")) type = ActionType.MESSAGE;
         else if (key.equals("cmd") || key.equals("command")) type = ActionType.COMMAND;
         else if (key.equals("item")) type = ActionType.ITEM;
+        else if (key.equals("title")) type = ActionType.TITLE;
+        else if (key.equals("sound")) type = ActionType.SOUND;
+        else if (key.equals("particle")) type = ActionType.PARTICLE;
+        else if (key.equals("potion")) type = ActionType.POTION;
 
         if (type == ActionType.UNKNOWN) return null;
 
-        String data = "";
-        int amount = 1;
-
+        Map<String, String> params = new HashMap<>();
         Matcher m = PARAM_PATTERN.matcher(body);
         while (m.find()) {
             String paramName = m.group(1).toLowerCase(Locale.ROOT);
-            String paramValue = m.group(3) != null ? m.group(3) : (m.group(4) != null ? m.group(4) : m.group(5));
-
-            if (paramName.startsWith("t") || paramName.startsWith("m") || paramName.startsWith("c") || paramName.startsWith("i")) {
-                data = paramValue;
-            } else if (paramName.equals("a") || paramName.startsWith("amt")) {
-                try { amount = Integer.parseInt(paramValue); } catch (NumberFormatException ignored) {}
-            }
+            String paramValue = m.group(3) != null ? m.group(3) : m.group(4) != null ? m.group(4) : m.group(5);
+            params.put(paramName, paramValue);
         }
 
-        return new ActionEntry(type, data, amount, delay, target);
+        return new ActionEntry(type, params, delay, target);
     }
 
     private void executeEntries(List<ActionEntry> list, QuestDef q, Player p) {
@@ -253,14 +228,16 @@ public final class ActionExecutor {
     private void executeOne(ActionEntry e, QuestDef q, Player p) {
         switch (e.type) {
             case MESSAGE -> {
-                String text = replace(p, e.data, q);
-                if (!text.isEmpty()) {
+                String text = e.params.getOrDefault("m", e.params.getOrDefault("t", e.params.get("text")));
+                text = replace(p, text, q);
+                if (text != null && !text.isEmpty()) {
                     p.sendMessage(ChatColor.translateAlternateColorCodes('&', text));
                 }
             }
             case COMMAND -> {
-                String cmd = replace(p, e.data, q);
-                if (!cmd.isEmpty()) {
+                String cmd = e.params.getOrDefault("c", e.params.get("cmd"));
+                cmd = replace(p, cmd, q);
+                if (cmd != null && !cmd.isEmpty()) {
                     if (e.target == Target.SERVER) {
                         Bukkit.dispatchCommand(Bukkit.getConsoleSender(), cmd);
                     } else {
@@ -269,18 +246,64 @@ public final class ActionExecutor {
                 }
             }
             case ITEM -> {
-                // 아이템 생성 (MMOItems/ItemsAdder/Vanilla)
-                ItemStack item = resolveItem(e.data, e.amount);
+                String id = e.params.getOrDefault("i", e.params.get("id"));
+                int amount = parseInt(e.params.getOrDefault("a", e.params.get("amt")), 1);
+                ItemStack item = resolveItem(id, amount);
                 if (item != null) {
                     HashMap<Integer, ItemStack> left = p.getInventory().addItem(item);
-                    // 인벤토리가 꽉 찼으면 바닥에 드랍
                     if (!left.isEmpty()) {
                         for (ItemStack drop : left.values()) {
                             p.getWorld().dropItem(p.getLocation(), drop);
                         }
                     }
-                } else {
-                    plugin.getLogger().warning("[QuestEngine] Unknown item ID: " + e.data);
+                }
+            }
+            case TITLE -> {
+                String title = replace(p, e.params.getOrDefault("t", e.params.getOrDefault("title", "")), q);
+                String subtitle = replace(p, e.params.getOrDefault("s", e.params.getOrDefault("subtitle", "")), q);
+                title = ChatColor.translateAlternateColorCodes('&', title);
+                subtitle = ChatColor.translateAlternateColorCodes('&', subtitle);
+
+                int in = parseInt(e.params.get("in"), 10);
+                int stay = parseInt(e.params.get("stay"), 70);
+                int out = parseInt(e.params.get("out"), 20);
+
+                p.sendTitle(title, subtitle, in, stay, out);
+            }
+            case SOUND -> {
+                String soundName = e.params.getOrDefault("s", e.params.get("sound"));
+                if (soundName == null || soundName.isEmpty()) return;
+                float vol = parseFloat(e.params.get("v"), 1.0f);
+                float pitch = parseFloat(e.params.get("p"), 1.0f);
+                try {
+                    Sound sound = Sound.valueOf(soundName.toUpperCase(Locale.ROOT));
+                    p.playSound(p.getLocation(), sound, vol, pitch);
+                } catch (Exception ex) {
+                    // Enum 에 없는 경우 리소스팩 커스텀 사운드로 간주하여 문자열로 재생
+                    p.playSound(p.getLocation(), soundName, vol, pitch);
+                }
+            }
+            case PARTICLE -> {
+                String pName = e.params.getOrDefault("p", e.params.get("particle"));
+                if (pName == null || pName.isEmpty()) return;
+                try {
+                    Particle particle = Particle.valueOf(pName.toUpperCase(Locale.ROOT));
+                    int count = parseInt(e.params.get("a"), 10);
+                    p.spawnParticle(particle, p.getLocation().add(0, 1, 0), count, 0.5, 0.5, 0.5, 0.01);
+                } catch (Exception ex) {
+                }
+            }
+            case POTION -> {
+                String typeStr = e.params.getOrDefault("t", e.params.get("type"));
+                if (typeStr == null || typeStr.isEmpty()) return;
+                try {
+                    PotionEffectType pType = PotionEffectType.getByName(typeStr.toUpperCase(Locale.ROOT));
+                    if (pType != null) {
+                        int duration = parseInt(e.params.get("d"), 100);
+                        int level = parseInt(e.params.get("l"), 1) - 1;
+                        p.addPotionEffect(new PotionEffect(pType, duration, Math.max(0, level)));
+                    }
+                } catch (Exception ex) {
                 }
             }
         }
@@ -288,48 +311,34 @@ public final class ActionExecutor {
 
     private String replace(Player p, String s, QuestDef q) {
         if (s == null) return "";
-        String t = s.replace("%player%", p.getName())
-                .replace("%quest_name%", q.name);
+        String t = s.replace("player", p.getName()).replace("questname", q.name);
         if (papi) {
             return PlaceholderAPI.setPlaceholders(p, t);
         }
         return t;
     }
 
-    // --- 아이템 생성 로직 (완전 구현) ---
     private ItemStack resolveItem(String id, int amount) {
         if (id == null || id.isEmpty()) return null;
-
-        // 1. MMOItems (Format: TYPE:ID ex: SWORD:CUTLASS)
         if (mmo && mmoGetItemMH != null && id.contains(":")) {
             try {
                 String[] split = id.split(":");
-                String typeStr = split[0].toUpperCase(Locale.ROOT); // ex: SWORD
-                String itemId = split[1].toUpperCase(Locale.ROOT);  // ex: CUTLASS
-
-                // Type.get("SWORD") 호출
+                String typeStr = split[0].toUpperCase(Locale.ROOT);
+                String itemId = split[1].toUpperCase(Locale.ROOT);
                 Object typeObj = mmoGetTypeMH.invoke(typeStr);
                 if (typeObj != null) {
-                    // MMOItems.plugin.getItem(typeObj, itemId) 호출
                     Object result = mmoGetItemMH.invoke(typeObj, itemId);
                     if (result instanceof ItemStack is) {
                         is.setAmount(amount);
                         return is;
                     }
                 }
-            } catch (Throwable ignored) {
-                // MMOItems 오류 시 무시하고 다음 단계(ItemsAdder 등)로 넘어갈지 선택
-                // 여기선 그냥 실패로 처리
-            }
+            } catch (Throwable ignored) {}
         }
-
-        // 2. ItemsAdder (Format: namespace:id)
         if (ia && iaGetInstanceMH != null && id.contains(":")) {
             try {
-                // CustomStack.getInstance("namespace:id")
                 Object customStack = iaGetInstanceMH.invoke(id);
                 if (customStack != null) {
-                    // customStack.getItemStack()
                     Object result = iaGetItemStackMH.invoke(customStack);
                     if (result instanceof ItemStack is) {
                         is.setAmount(amount);
@@ -338,15 +347,12 @@ public final class ActionExecutor {
                 }
             } catch (Throwable ignored) {}
         }
-
-        // 3. Vanilla Material
         try {
             Material mat = Material.matchMaterial(id.toUpperCase(Locale.ROOT));
             if (mat != null) {
                 return new ItemStack(mat, amount);
             }
         } catch (Throwable ignored) {}
-
         return null;
     }
 
@@ -363,5 +369,15 @@ public final class ActionExecutor {
         } catch (Throwable t) {
             return 0;
         }
+    }
+
+    private int parseInt(String s, int def) {
+        if (s == null) return def;
+        try { return Integer.parseInt(s); } catch (Exception e) { return def; }
+    }
+
+    private float parseFloat(String s, float def) {
+        if (s == null) return def;
+        try { return Float.parseFloat(s); } catch (Exception e) { return def; }
     }
 }

@@ -1,6 +1,5 @@
 prefix: "&7[&aQuestEngine&7] "
 
-# 언어 시스템
 language_changed: "&a언어가 %lang%(으)로 변경되었습니다."
 language_selector_title: "&8언어 선택"
 language_item_name: "&e%lang_name%"
@@ -24,18 +23,12 @@ quest_repeat_ready: "&6'%quest_name%' 퀘스트를 다시 시작할 수 있습�
 quest_no_repeat: "&c이 퀘스트는 이미 완료되었으며 반복할 수 없습니다."
 quest_locked: "&c퀘스트를 시작할 수 없습니다. 선행 조건을 만족하지 못했습니다."
 
-# ==========================================================
-# 퀘스트 게시판 & 체인 시스템
-# ==========================================================
 quest_board_only: "&7이 퀘스트는 퀘스트 게시판에서만 수락할 수 있습니다."
 quest_board_repeat: "&e'%quest_name%' 완료.&7 반복하려면 게시판에서 다시 수락하세요."
 quest_chain: "&a'%current%' 완료. 연계 퀘스트 &e%next%&a 가 시작되었습니다."
 quest_chain_board: "&a'%current%' 완료. 이제 게시판에서 연계 퀘스트 &e%next%&a 를 확인할 수 있습니다."
 quest_chain_end: "&a모든 연계 퀘스트를 완료했습니다."
 
-# ==========================================================
-# 관리자 (ADMIN)
-# ==========================================================
 admin:
   usage: "&7/questadmin <reload|give|complete|stop|reset|list|points|rank|lang>"
   reloaded: "&a모든 퀘스트가 리로드되었습니다!"
@@ -54,9 +47,6 @@ admin:
   rank_entry: "&7#%rank% &f%player% &8- &e%points% pts"
   no_data: "&7표시할 데이터가 없습니다."
 
-# ==========================================================
-# GUI 공통 (COMMON)
-# ==========================================================
 gui:
   lore:
     list:
@@ -125,9 +115,6 @@ gui:
     rank_points: "&7포인트: &a%points%"
     no_data: "&7데이터가 없습니다."
 
-  # ==========================================================
-  # 퀘스트 에디터 GUI
-  # ==========================================================
   editor:
     title:
       main: "&9퀘스트 에디터 - %tab%"
@@ -372,3 +359,31 @@ gui:
     save:
       ok: "&a퀘스트 저장 완료: %id%"
       fail: "&c저장 실패: %msg%"
+    template:
+      title: "&9추가할 항목 선택"
+      action:
+        msg: "&e메시지 출력"
+        cmd: "&c명령어 실행"
+        item: "&b아이템 지급"
+        delay: "&7대기 시간"
+      cond:
+        level: "&e레벨 조건"
+        world: "&a월드 조건"
+        papi: "&bPAPI 조건"
+      target:
+        all: "&e모든 대상 허용"
+        block: "&7일반 블록 파괴"
+        mob: "&c일반 몹 처치"
+        mythic_kill: "&4미스틱 몹 처치"
+        citizens: "&a시티즌 NPC 클릭"
+        mythic_interact: "&6미스틱 몹 클릭"
+        vanilla_interact: "&f바닐라 엔티티 클릭"
+        command: "&b명령어 입력"
+        chat: "&d채팅 입력"
+        multiple: "&8다중 타겟 지정"
+      default: "&e기본 예제 추가"
+      custom_input: "&f직접 채팅으로 입력"
+      cancel: "&c취소 및 뒤로 가기"
+      lore:
+        add: "&7클릭 시 아래 내용이 추가됩니다:"
+        edit: "&8추가 후 클릭하여 값을 수정하세요."
