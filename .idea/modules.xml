@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/QuestEngine.iml" filepath="$PROJECT_DIR$/QuestEngine.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/QuestEngine.iml" filepath="$PROJECT_DIR$/.idea/QuestEngine.iml" />
     </modules>
   </component>
 </project>

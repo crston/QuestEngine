@@ -392,7 +392,20 @@ public final class QuestEditorMenu implements Listener {
                 else if (slot == 28) promptOrClear(p, L, R, "", v -> d.displayDifficulty = v);
             }
             case EVENT -> {
-                if (slot == 10) { if (R) { d.event="CUSTOM"; openMainDelayed(p,s); } else if (c.isShiftClick()) openEventSelectDelayed(p); else if (L) promptOrClear(p, true, false, "", v->d.event=v.toUpperCase(Locale.ROOT)); }
+                if (slot == 10) {
+                    if (c == ClickType.SHIFT_RIGHT) {
+                        d.event = "CUSTOM";
+                        openMainDelayed(p, s);
+                    } else if (R) {
+                        p.closeInventory();
+                        ChatInput.await(p, m(p, "gui.editor.prompt.generic_text"), (pl, v) -> {
+                            s.draft.event = v.toUpperCase(Locale.ROOT);
+                            openMainDelayed(pl, sessions.get(pl.getUniqueId()));
+                        });
+                    } else if (L) {
+                        openEventSelectDelayed(p);
+                    }
+                }
                 else if (slot == 12 && L) { d.startMode = QuestDef.StartMode.values()[(d.startMode.ordinal()+1)%4]; openMainDelayed(p,s); }
                 else if (slot == 14) promptOrClear(p, L, R, "vanilla", v -> d.type = v.toLowerCase(Locale.ROOT));
             }
