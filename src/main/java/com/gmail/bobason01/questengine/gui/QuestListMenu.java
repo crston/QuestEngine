@@ -191,7 +191,7 @@ public final class QuestListMenu implements Listener {
                         handled = true;
                     }
 
-                    // Hint Command 실행 (무조건 명령어로 처리)
+                    // Hint Command 무조건 명령어로 처리
                     if (!handled && q.display.hint != null && !q.display.hint.isEmpty()) {
                         String cmd = q.display.hint;
                         if (cmd.startsWith("/")) cmd = cmd.substring(1);
@@ -212,16 +212,13 @@ public final class QuestListMenu implements Listener {
         }
     }
 
-    /**
-     * 텍스트 내의 %player% 및 PlaceholderAPI 변수를 실제 값으로 치환합니다.
-     */
     private String applyPlaceholders(Player p, String text) {
         if (text == null || text.isEmpty()) return "";
 
-        // 1. 기본 색상 및 %player% 치환
+        // 기본 색상 및 플레이어 이름 치환
         text = ChatColor.translateAlternateColorCodes('&', text.replace("%player%", p.getName()));
 
-        // 2. PlaceholderAPI 연동
+        // PlaceholderAPI 연동
         if (Bukkit.getPluginManager().isPluginEnabled("PlaceholderAPI")) {
             return me.clip.placeholderapi.PlaceholderAPI.setPlaceholders(p, text);
         }

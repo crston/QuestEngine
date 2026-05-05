@@ -61,7 +61,7 @@ public final class LanguageMenu implements Listener {
         ItemStack clicked = e.getCurrentItem();
         if (clicked == null || !clicked.hasItemMeta()) return;
 
-        // 로어에서 국가 코드 추출 (예: "Code: KO")
+        // 로어에서 국가 코드 추출
         List<String> lore = clicked.getItemMeta().getLore();
         if (lore == null || lore.isEmpty()) return;
 
@@ -69,12 +69,12 @@ public final class LanguageMenu implements Listener {
 
         // 언어 변경 및 저장
         plugin.progress().of(p.getUniqueId(), p.getName()).setLanguage(code);
-        p.sendMessage(plugin.msg().pref(p, "language_changed").replace("%lang%", code.toUpperCase()));
+        p.sendMessage(plugin.msg().get(p, "language_changed").replace("%lang%", code.toUpperCase()));
 
         p.closeInventory();
         plugin.gui().sound(p, "success");
 
-        // 퀘스트 목록 다시 열기 (변경된 언어 적용)
+        // 퀘스트 목록 다시 열기
         Bukkit.getScheduler().runTaskLater(plugin, () -> plugin.gui().list().open(p, 0), 1L);
     }
 }

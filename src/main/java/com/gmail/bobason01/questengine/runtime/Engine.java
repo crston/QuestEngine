@@ -112,15 +112,15 @@ public final class Engine {
         preloadInternalQuests();
     }
 
-    // --- Core Logic ---
+    // 핵심 로직
 
-    // [NEW] 유저 퇴장 시 메모리 누수 방지용 캐시 정리 (추가됨)
+    // 유저 퇴장 시 메모리 누수 방지용 캐시 정리 추가됨
     public void cleanupPlayer(UUID uid) {
         if (uid == null) return;
         playerLocks.remove(uid);
         recentEventWindow.remove(uid);
         npcArm.remove(uid);
-        // conditionCache는 UUID별로 복잡하게 엮여있으므로 TTL에 의해 자연 소멸되거나, key가 uid로 시작하는 것을 지울 수 있습니다.
+        // conditionCache는 UUID별로 복잡하게 엮여있으므로 TTL에 의해 자연 소멸되거나 key가 uid로 시작하는 것을 지울 수 있습니다
         conditionCache.keySet().removeIf(k -> k.startsWith(uid.toString()));
     }
 
@@ -258,9 +258,9 @@ public final class Engine {
         }
         if (event instanceof EntityDeathEvent) return ((EntityDeathEvent) event).getEntity().getType().name();
         if (event instanceof PlayerCommandPreprocessEvent) {
-            String msg = ((PlayerCommandPreprocessEvent) event).getMessage();
-            if (msg.startsWith("/")) return msg.substring(1);
-            return msg;
+            String msgText = ((PlayerCommandPreprocessEvent) event).getMessage();
+            if (msgText.startsWith("/")) return msgText.substring(1);
+            return msgText;
         }
         if (event instanceof AsyncPlayerChatEvent) return ((AsyncPlayerChatEvent) event).getMessage();
         return "";
@@ -294,7 +294,7 @@ public final class Engine {
 
                 boolean active = progress.isActive(uid, name, def.id);
 
-                // Start Logic
+                // 퀘스트 시작 로직
                 if (!active) {
                     if (def.startMode != QuestDef.StartMode.AUTO) continue;
                     if (!isSelf && !def.party) continue;
@@ -309,13 +309,13 @@ public final class Engine {
                     progress.start(uid, name, def);
                     actions.runAll(def, "accept", beneficiary);
                     actions.runAll(def, "start", beneficiary);
-                    beneficiary.sendMessage(format(beneficiary, msg.pref("quest_started").replace("%quest_name%", def.name)));
+                    beneficiary.sendMessage(format(beneficiary, msg.get(beneficiary, "quest_started").replace("%quest_name%", def.name)));
                     active = true;
                 }
 
                 if (!active) continue;
 
-                // Progress Logic
+                // 퀘스트 진행 로직
                 if (!checkTargetMatch(actor, event, matcher, def)) continue;
 
                 if (checkAnyFail(actor, event, ctx, def.condFail)) {
@@ -429,7 +429,7 @@ public final class Engine {
         if (!active && !completed) {
             if (!progress.canStart(uid, name, candidate)) return;
             if (!checkRequirements(uid, name, candidate)) {
-                player.sendMessage(format(player, msg.pref("quest_locked")));
+                player.sendMessage(format(player, msg.get(player, "quest_locked")));
                 return;
             }
 
@@ -438,7 +438,7 @@ public final class Engine {
             progress.start(uid, name, candidate);
             actions.runAll(candidate, "accept", player);
             actions.runAll(candidate, "start", player);
-            player.sendMessage(format(player, msg.pref("quest_started").replace("%quest_name%", candidate.name)));
+            player.sendMessage(format(player, msg.get(player, "quest_started").replace("%quest_name%", candidate.name)));
         }
         npcArm.put(uid, new NpcArmState(candidate.id, now + NPC_ARM_WINDOW_NANOS));
     }
@@ -448,7 +448,7 @@ public final class Engine {
         String name = player.getName();
         actions.runAll(def, "success", player);
         progress.complete(uid, name, def);
-        player.sendMessage(format(player, msg.pref("quest_completed").replace("%quest_name%", def.name)));
+        player.sendMessage(format(player, msg.get(player, "quest_completed").replace("%quest_name%", def.name)));
         runCompletionFlow(player, def);
     }
 
@@ -463,22 +463,22 @@ public final class Engine {
         String name = player.getName();
 
         if (!checkRequirements(uid, name, def)) {
-            player.sendMessage(format(player, msg.pref("quest_locked")));
+            player.sendMessage(format(player, msg.get(player, "quest_locked")));
             return;
         }
 
         if (!progress.canStart(uid, name, def)) {
-            player.sendMessage(format(player, msg.pref("quest_no_repeat").replace("%quest_name%", def.name)));
+            player.sendMessage(format(player, msg.get(player, "quest_no_repeat").replace("%quest_name%", def.name)));
             return;
         }
         if (progress.isActive(uid, name, def.id)) {
-            player.sendMessage(format(player, msg.pref("quest_already_active")));
+            player.sendMessage(format(player, msg.get(player, "quest_already_active")));
             return;
         }
         progress.start(uid, name, def);
         actions.runAll(def, "accept", player);
         actions.runAll(def, "start", player);
-        player.sendMessage(format(player, msg.pref("quest_started").replace("%quest_name%", def.name)));
+        player.sendMessage(format(player, msg.get(player, "quest_started").replace("%quest_name%", def.name)));
     }
 
     public void cancelQuest(Player p, String questId) {
@@ -489,12 +489,12 @@ public final class Engine {
     public void cancelQuest(Player player, QuestDef def) {
         if (player == null || def == null) return;
         if (!progress.isActive(player.getUniqueId(), player.getName(), def.id)) {
-            player.sendMessage(format(player, msg.pref("quest_not_active")));
+            player.sendMessage(format(player, msg.get(player, "quest_not_active")));
             return;
         }
         progress.cancel(player.getUniqueId(), player.getName(), def.id);
         actions.runAll(def, "cancel", player);
-        player.sendMessage(format(player, msg.pref("quest_canceled").replace("%quest_name%", def.name)));
+        player.sendMessage(format(player, msg.get(player, "quest_canceled").replace("%quest_name%", def.name)));
     }
 
     public void stopQuest(UUID uuid, String playerName, String questId) {
@@ -505,7 +505,7 @@ public final class Engine {
         if (p != null && p.isOnline()) {
             QuestDef q = quests.get(id);
             if (q != null) actions.runAll(q, "cancel", p);
-            p.sendMessage(format(p, msg.pref("quest_stopped").replace("%quest_name%", q != null ? q.name : id)));
+            p.sendMessage(format(p, msg.get(p, "quest_stopped").replace("%quest_name%", q != null ? q.name : id)));
         }
     }
 
@@ -515,7 +515,7 @@ public final class Engine {
         String name = player.getName();
         if (!progress.isActive(uid, name, def.id)) return;
         progress.cancel(uid, name, def.id);
-        player.sendMessage(format(player, msg.pref("quest_stopped").replace("%quest_name%", def.name)));
+        player.sendMessage(format(player, msg.get(player, "quest_stopped").replace("%quest_name%", def.name)));
     }
 
     public void forceComplete(UUID uuid, String playerName, String questId) {
@@ -527,7 +527,7 @@ public final class Engine {
             progress.complete(uuid, playerName, q);
             if (p != null) {
                 actions.runAll(q, "success", p);
-                p.sendMessage(format(p, msg.pref("quest_completed").replace("%quest_name%", q.name)));
+                p.sendMessage(format(p, msg.get(p, "quest_completed").replace("%quest_name%", q.name)));
                 runCompletionFlow(p, q);
             }
         } else {
@@ -539,14 +539,14 @@ public final class Engine {
         if (player == null || def == null) return;
         progress.complete(player.getUniqueId(), player.getName(), def);
         actions.runAll(def, "success", player);
-        player.sendMessage(format(player, msg.pref("quest_completed").replace("%quest_name%", def.name)));
+        player.sendMessage(format(player, msg.get(player, "quest_completed").replace("%quest_name%", def.name)));
         runCompletionFlow(player, def);
     }
 
     public void abandonAll(Player player) {
         if (player != null) {
             progress.cancelAll(player.getUniqueId(), player.getName());
-            player.sendMessage(format(player, msg.pref("abandon_all_done")));
+            player.sendMessage(format(player, msg.get(player, "abandon_all_done")));
         }
     }
 
@@ -554,15 +554,15 @@ public final class Engine {
         if (player == null) return;
         List<String> active = progress.activeOf(player.getUniqueId(), player.getName());
         if (active == null || active.isEmpty()) {
-            player.sendMessage(format(player, msg.pref("list_empty")));
+            player.sendMessage(format(player, msg.get(player, "list_empty")));
             return;
         }
-        player.sendMessage(format(player, msg.pref("list_header")));
+        player.sendMessage(format(player, msg.get(player, "list_header")));
         for (String id : active) {
             QuestDef def = quests.byId(id);
             if (def == null) continue;
             int value = progress.value(player.getUniqueId(), player.getName(), id);
-            player.sendMessage(format(player, "&f- &a" + def.name + " &7(&e" + value + " / " + Math.max(1, def.amount) + "&7)"));
+            player.sendMessage(format(player, ChatColor.translateAlternateColorCodes('&', "&f- &a" + def.name + " &7(&e" + value + " / " + Math.max(1, def.amount) + "&7)")));
         }
     }
 
@@ -573,10 +573,10 @@ public final class Engine {
             QuestDef next = quests.byId(nextId);
             if (next != null) {
                 if (checkRequirements(player.getUniqueId(), player.getName(), next)) {
-                    player.sendMessage(format(player, msg.pref("quest_chain").replace("%current%", def.name).replace("%next%", next.name)));
+                    player.sendMessage(format(player, msg.get(player, "quest_chain").replace("%current%", def.name).replace("%next%", next.name)));
                     startQuest(player, next);
                 } else {
-                    player.sendMessage(format(player, msg.pref("quest_locked")));
+                    player.sendMessage(format(player, msg.get(player, "quest_locked")));
                 }
             }
         }
@@ -751,13 +751,13 @@ public final class Engine {
 
         matchers.put("player_command", (player, event, target) -> {
             if (!(event instanceof PlayerCommandPreprocessEvent)) return false;
-            String msg = ((PlayerCommandPreprocessEvent) event).getMessage().toLowerCase(Locale.ROOT);
-            return msg.startsWith("/" + target.toLowerCase(Locale.ROOT));
+            String msgText = ((PlayerCommandPreprocessEvent) event).getMessage().toLowerCase(Locale.ROOT);
+            return msgText.startsWith("/" + target.toLowerCase(Locale.ROOT));
         });
         matchers.put("player_chat", (player, event, target) -> {
             if (!(event instanceof AsyncPlayerChatEvent)) return false;
-            String msg = ((AsyncPlayerChatEvent) event).getMessage().toLowerCase(Locale.ROOT);
-            return msg.contains(target.toLowerCase(Locale.ROOT));
+            String msgText = ((AsyncPlayerChatEvent) event).getMessage().toLowerCase(Locale.ROOT);
+            return msgText.contains(target.toLowerCase(Locale.ROOT));
         });
     }
 
