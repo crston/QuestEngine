@@ -17,7 +17,7 @@ public final class QuestPapiExpansion extends PlaceholderExpansion {
     private final QuestEnginePlugin plugin;
 
     private static final Map<String, CacheNode> CACHE = new ConcurrentHashMap<>(256);
-    private static final long TTL_NANOS = 100_000_000L; // 100ms
+    private static final long TTL_NANOS = 100_000_000L;
     private static final int BAR_LEN = 20;
 
     private record CacheNode(String val, long expireTime) {}
@@ -111,7 +111,23 @@ public final class QuestPapiExpansion extends PlaceholderExpansion {
                 String field = sub.substring(lastUnderscore + 1);
 
                 QuestDef q = quests.get(qid);
-                return q == null ? "" : getField(q, qid, field, repo, uid, name);
+
+                // qid 안에 언더스코어가 포함되어 있는 퀘스트의 경우 예외 처리
+                // ex) qid_zombie_kill_1_title (qid: zombie_kill_1, field: title)
+                if (q == null) {
+                    for (int i = sub.length() - 1; i > 0; i--) {
+                        if (sub.charAt(i) == '_') {
+                            String potentialQid = sub.substring(0, i);
+                            String potentialField = sub.substring(i + 1);
+                            QuestDef potentialQ = quests.get(potentialQid);
+                            if (potentialQ != null) {
+                                return getField(potentialQ, potentialQid, potentialField, repo, uid, name);
+                            }
+                        }
+                    }
+                } else {
+                    return getField(q, qid, field, repo, uid, name);
+                }
             }
         }
 
@@ -124,6 +140,26 @@ public final class QuestPapiExpansion extends PlaceholderExpansion {
             case "name" -> q.name;
             case "title" -> q.display != null ? ChatColor.translateAlternateColorCodes('&', q.display.title) : q.name;
             case "reward" -> q.display != null ? ChatColor.translateAlternateColorCodes('&', q.display.reward) : "";
+            case "description" -> {
+                if (q.display != null && q.display.description != null && !q.display.description.isEmpty()) {
+                    yield ChatColor.translateAlternateColorCodes('&', q.display.description.get(0));
+                }
+                yield "";
+            }
+            case "description_full" -> {
+                if (q.display != null && q.display.description != null && !q.display.description.isEmpty()) {
+                    StringBuilder descBuilder = new StringBuilder();
+                    for (int i = 0; i < q.display.description.size(); i++) {
+                        descBuilder.append(ChatColor.translateAlternateColorCodes('&', q.display.description.get(i)));
+                        if (i < q.display.description.size() - 1) descBuilder.append("\n");
+                    }
+                    yield descBuilder.toString();
+                }
+                yield "";
+            }
+            case "icon" -> q.display != null && q.display.icon != null ? q.display.icon : "BOOK";
+            case "cmd" -> q.display != null ? String.valueOf(q.display.customModelData) : "0";
+            case "party" -> String.valueOf(q.party);
             case "points" -> String.valueOf(q.points);
             case "target" -> String.valueOf(q.amount);
             case "progress" -> String.valueOf(repo.value(uid, name, qid));
