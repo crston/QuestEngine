@@ -33,13 +33,11 @@ public final class QuestConfirmMenu implements Listener {
 
         String qName = q.name != null ? q.name : q.id;
 
-        // [FIX] Msg.get(p, path)로 플레이어 인자 추가
         String rawTitle = plugin.msg().get(p, "gui.confirm.title").replace("%quest%", qName);
         String title = format(p, rawTitle);
 
         Inventory inv = Bukkit.createInventory(new GuiHolder("Q_CONFIRM"), 27, title);
 
-        // 버튼 텍스트 다국어화 (필요시 messages.yml에 키 추가)
         inv.setItem(11, icon(Material.LIME_WOOL, format(p, "&aYES")));
         inv.setItem(15, icon(Material.RED_WOOL, format(p, "&cNO")));
 
@@ -60,18 +58,12 @@ public final class QuestConfirmMenu implements Listener {
 
         int slot = e.getRawSlot();
 
-        // 이전 페이지 번호 가져오기
         int backPage = 0;
         Object bp = plugin.gui().getSession(p, "confirm_back_page");
         if (bp instanceof Integer i) backPage = i;
 
         if (slot == 11) { // YES: 퀘스트 포기
             plugin.engine().cancelQuest(p, q);
-
-            // [FIX] Msg.get(p, path)로 플레이어 인자 추가
-            String msgStr = plugin.msg().get(p, "gui.confirm.cancel_done")
-                    .replace("%quest%", q.name != null ? q.name : q.id);
-            p.sendMessage(format(p, msgStr));
 
             int finalBackPage = backPage;
             Bukkit.getScheduler().runTask(plugin, () -> plugin.gui().list().open(p, finalBackPage));

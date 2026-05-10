@@ -6,6 +6,9 @@ import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
 
 import java.io.File;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 public final class Msg {
@@ -29,13 +32,59 @@ public final class Msg {
 
         langFiles.clear();
         availableLanguages.clear();
-        File[] files = folder.listFiles((d, name) -> name.endsWith(".yml"));
 
+        // 1. 기본 제공 언어 리스트 정의
+        String[] defaultLangs = {"en", "ko"};
+
+        // 2. 기본 언어들에 대해 업데이트 체크 진행
+        for (String lang : defaultLangs) {
+            updateLangFile(lang);
+        }
+
+        // 3. 폴더 내의 모든 언어 파일 로드
+        File[] files = folder.listFiles((d, name) -> name.endsWith(".yml"));
         if (files != null) {
             for (File f : files) {
                 String langCode = f.getName().replace(".yml", "");
                 langFiles.put(langCode, YamlConfiguration.loadConfiguration(f));
                 availableLanguages.add(langCode);
+            }
+        }
+    }
+
+    /**
+     * 리소스 내의 원본 파일과 비교하여 누락된 키를 로컬 파일에 추가합니다.
+     */
+    private void updateLangFile(String langCode) {
+        String fileName = "lang/" + langCode + ".yml";
+        File file = new File(plugin.getDataFolder(), fileName);
+
+        if (!file.exists()) return;
+
+        YamlConfiguration config = YamlConfiguration.loadConfiguration(file);
+
+        // jar 파일 내부의 원본 리소스를 읽어옴
+        InputStream is = plugin.getResource(fileName);
+        if (is == null) return;
+
+        YamlConfiguration internalConfig = YamlConfiguration.loadConfiguration(new InputStreamReader(is, StandardCharsets.UTF_8));
+
+        boolean changed = false;
+        // 내부 리소스의 모든 키를 순회하며 로컬 파일에 없는 것만 추가
+        for (String key : internalConfig.getKeys(true)) {
+            if (!config.contains(key)) {
+                config.set(key, internalConfig.get(key));
+                changed = true;
+            }
+        }
+
+        // 변경 사항이 있다면 파일 저장
+        if (changed) {
+            try {
+                config.save(file);
+                plugin.getLogger().info("Updated missing language keys in " + fileName);
+            } catch (Exception e) {
+                e.printStackTrace();
             }
         }
     }
@@ -66,7 +115,6 @@ public final class Msg {
         return color(msg);
     }
 
-    // Prefix 제거 요청에 따라 pref 호출 시에도 일반 get과 동일하게 동작하도록 수정
     public String pref(Player p, String path) {
         return get(p, path);
     }

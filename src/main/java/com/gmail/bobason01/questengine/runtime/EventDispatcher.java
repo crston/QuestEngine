@@ -13,20 +13,50 @@ import org.bukkit.event.inventory.*;
 import org.bukkit.event.player.*;
 import org.bukkit.plugin.Plugin;
 
+import java.lang.reflect.Method;
+
 public final class EventDispatcher implements Listener {
 
     private final Engine engine;
+    private Method isMenuClickMethod;
+    private Object apiInstance;
 
     public EventDispatcher(Plugin plugin, Engine engine) {
         this.engine = engine;
-        Bukkit.getPluginManager().registerEvents(this, plugin);
 
-        // NPC 상호작용 관련 리스너는 각 브릿지 클래스(CitizensNpcInteractBridge 등)에서
-        // 개별적으로 등록하므로 여기서 등록하는 중복된 내부 클래스는 제거되었습니다.
+        // 리플렉션을 통한 CraftSlotAPI 주입 시도
+        try {
+            Class<?> providerClass = Class.forName("com.gmail.bobason01.api.CraftSlotAPIProvider");
+            Method getMethod = providerClass.getMethod("get");
+            this.apiInstance = getMethod.invoke(null);
+
+            if (this.apiInstance != null) {
+                this.isMenuClickMethod = this.apiInstance.getClass().getMethod("isMenuClick", InventoryClickEvent.class);
+                plugin.getLogger().info("[QuestEngine] CraftSlotAPI successfully injected via reflection.");
+            }
+        } catch (Exception ignored) {
+            // API가 없으면 조용히 넘어감
+        }
+
+        Bukkit.getPluginManager().registerEvents(this, plugin);
     }
 
     private void handle(Player player, String key, Event event) {
         if (player != null) engine.handle(player, key, event);
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    public void onCraftSlotClick(InventoryClickEvent e) {
+        if (apiInstance == null || isMenuClickMethod == null) return;
+        if (!(e.getWhoClicked() instanceof Player p)) return;
+
+        try {
+            // 리플렉션으로 api.isMenuClick(e) 호출
+            boolean isMenuClick = (boolean) isMenuClickMethod.invoke(apiInstance, e);
+            if (isMenuClick) {
+                handle(p, "CRAFTSLOT_CLICK", e);
+            }
+        } catch (Exception ignored) {}
     }
 
     // --- BLOCK EVENTS ---
@@ -41,9 +71,7 @@ public final class EventDispatcher implements Listener {
     public void onFertilize(BlockFertilizeEvent e) { handle(e.getPlayer(), "BLOCK_FERTILIZING", e); }
 
     @EventHandler(ignoreCancelled = true)
-    public void onCompost(InventoryMoveItemEvent e) {
-        handle(null, "COMPOSTING", e);
-    }
+    public void onCompost(InventoryMoveItemEvent e) { handle(null, "COMPOSTING", e); }
 
     // --- PLAYER MOVEMENTS & STATUS ---
 
@@ -62,7 +90,6 @@ public final class EventDispatcher implements Listener {
     @EventHandler
     public void onQuit(PlayerQuitEvent e) {
         handle(e.getPlayer(), "PLAYER_LEAVE", e);
-        // [NEW] 유저 퇴장 시 Engine에 쌓이는 캐시(Memory Leak 방지용) 삭제
         engine.cleanupPlayer(e.getPlayer().getUniqueId());
     }
 
@@ -126,9 +153,7 @@ public final class EventDispatcher implements Listener {
     }
 
     @EventHandler(ignoreCancelled = true)
-    public void onSpawn(EntitySpawnEvent e) {
-        handle(null, "ENTITY_SPAWN", e);
-    }
+    public void onSpawn(EntitySpawnEvent e) { handle(null, "ENTITY_SPAWN", e); }
 
     // --- ITEM & INVENTORY ---
 

@@ -740,7 +740,6 @@ public final class Engine {
             String type = ((EntityDeathEvent) event).getEntity().getType().name();
             return checkTokens(type, target);
         });
-
         matchers.put("mythicmobs_entity_kill", (player, event, target) -> {
             if (event instanceof MythicMobDeathEvent) {
                 String id = ((MythicMobDeathEvent) event).getMobType().getInternalName();
@@ -748,11 +747,13 @@ public final class Engine {
             }
             return false;
         });
-
         matchers.put("player_command", (player, event, target) -> {
-            if (!(event instanceof PlayerCommandPreprocessEvent)) return false;
-            String msgText = ((PlayerCommandPreprocessEvent) event).getMessage().toLowerCase(Locale.ROOT);
-            return msgText.startsWith("/" + target.toLowerCase(Locale.ROOT));
+            if (!(event instanceof PlayerCommandPreprocessEvent e)) return false;
+            String msgText = e.getMessage().toLowerCase(Locale.ROOT);
+            String rawTarget = target.toLowerCase(Locale.ROOT);
+            String cleanTarget = rawTarget.replaceAll("%[^%]+%", "").trim();
+            String cmdBody = msgText.startsWith("/") ? msgText.substring(1) : msgText;
+            return cmdBody.contains(cleanTarget);
         });
         matchers.put("player_chat", (player, event, target) -> {
             if (!(event instanceof AsyncPlayerChatEvent)) return false;

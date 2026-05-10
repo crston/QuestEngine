@@ -59,7 +59,7 @@ public final class QuestEditorMenu implements Listener {
             "PLAYER_ARMOR", "PLAYER_BED_ENTER", "PLAYER_CHAT", "PLAYER_COMMAND",
             "PLAYER_EXP_GAIN", "PLAYER_LEAVE", "PLAYER_LEVELUP", "PLAYER_PRE_JOIN",
             "PLAYER_RESPAWN", "PLAYER_SWAP_HAND", "PLAYER_TELEPORT", "PLAYER_WALK",
-            "SMITHING", "TAMING", "WORLD_CHUNK_LOAD"
+            "SMITHING", "TAMING", "WORLD_CHUNK_LOAD", "CRAFTSLOT_CLICK"
     );
 
     public QuestEditorMenu(QuestEnginePlugin plugin) {

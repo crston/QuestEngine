@@ -46,6 +46,9 @@ admin:
   rank_header: "&a===== 퀘스트 포인트 순위 ====="
   rank_entry: "&7#%rank% &f%player% &8- &e%points% pts"
   no_data: "&7표시할 데이터가 없습니다."
+  delete_done: "&a퀘스트 삭제 완료: %quest_name%"
+  delete_fail_not_found: "&c삭제 실패: '%quest_name%' 퀘스트를 찾을 수 없습니다."
+  delete_fail_error: "&c삭제 중 오류가 발생했습니다. 콘솔을 확인하세요."
 
 gui:
   lore:

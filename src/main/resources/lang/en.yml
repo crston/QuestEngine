@@ -46,6 +46,9 @@ admin:
   rank_header: "&a===== Quest Points Ranking ====="
   rank_entry: "&7#%rank% &f%player% &8- &e%points% pts"
   no_data: "&7No ranking data available."
+  delete_done: "&aQuest successfully deleted: %quest_name%"
+  delete_fail_not_found: "&cDelete failed: Quest '%quest_name%' not found."
+  delete_fail_error: "&cAn error occurred during deletion. Please check the console."
 
 gui:
   lore:
