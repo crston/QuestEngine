@@ -112,15 +112,11 @@ public final class Engine {
         preloadInternalQuests();
     }
 
-    // 핵심 로직
-
-    // 유저 퇴장 시 메모리 누수 방지용 캐시 정리 추가됨
     public void cleanupPlayer(UUID uid) {
         if (uid == null) return;
         playerLocks.remove(uid);
         recentEventWindow.remove(uid);
         npcArm.remove(uid);
-        // conditionCache는 UUID별로 복잡하게 엮여있으므로 TTL에 의해 자연 소멸되거나 key가 uid로 시작하는 것을 지울 수 있습니다
         conditionCache.keySet().removeIf(k -> k.startsWith(uid.toString()));
     }
 
@@ -287,22 +283,15 @@ public final class Engine {
 
             for (QuestDef def : list) {
                 if (def == null) continue;
-
-                if (!isSelf && !def.party) {
-                    continue;
-                }
+                if (!isSelf && !def.party) continue;
 
                 boolean active = progress.isActive(uid, name, def.id);
 
-                // 퀘스트 시작 로직
                 if (!active) {
                     if (def.startMode != QuestDef.StartMode.AUTO) continue;
                     if (!isSelf && !def.party) continue;
-
                     if (!progress.canStart(uid, name, def)) continue;
-
                     if (!checkRequirements(uid, name, def)) continue;
-
                     if (!checkTargetMatch(actor, event, matcher, def)) continue;
                     if (!checkConditions(actor, event, ctx, def.condStart)) continue;
 
@@ -315,7 +304,6 @@ public final class Engine {
 
                 if (!active) continue;
 
-                // 퀘스트 진행 로직
                 if (!checkTargetMatch(actor, event, matcher, def)) continue;
 
                 if (checkAnyFail(actor, event, ctx, def.condFail)) {
@@ -331,7 +319,6 @@ public final class Engine {
                 if (!checkConditions(actor, event, ctx, def.condSuccess)) continue;
 
                 int value = progress.addProgress(uid, name, def.id, 1);
-
                 if (value >= def.amount) {
                     if (pending == null) pending = new ArrayList<>();
                     pending.add(() -> handleQuestCompleteOnMain(beneficiary, def));
@@ -339,9 +326,7 @@ public final class Engine {
             }
         }
 
-        if (pending != null) {
-            scheduleMain(pending);
-        }
+        if (pending != null) scheduleMain(pending);
     }
 
     private void processCustomInternal(
@@ -363,7 +348,6 @@ public final class Engine {
             for (QuestDef def : list) {
                 if (def == null) continue;
                 if (!progress.isActive(uid, name, def.id)) continue;
-
                 if (!isSelf && !def.party) continue;
 
                 if (checkAnyFail(actor, null, ctx, def.condFail)) {
@@ -400,7 +384,6 @@ public final class Engine {
             if (def == null) continue;
             if (def.startMode != QuestDef.StartMode.PUBLIC && def.startMode != QuestDef.StartMode.NPC) continue;
             if (def.hasTarget() && !def.matchesTarget(targetId)) continue;
-
             if (!progress.canStart(uid, name, def) && !progress.isActive(uid, name, def.id)) continue;
             if (!checkRequirements(uid, name, def)) continue;
 
@@ -432,7 +415,6 @@ public final class Engine {
                 player.sendMessage(format(player, msg.get(player, "quest_locked")));
                 return;
             }
-
             if (!checkConditions(player, null, ctx, candidate.condStart)) return;
 
             progress.start(uid, name, candidate);
@@ -466,7 +448,6 @@ public final class Engine {
             player.sendMessage(format(player, msg.get(player, "quest_locked")));
             return;
         }
-
         if (!progress.canStart(uid, name, def)) {
             player.sendMessage(format(player, msg.get(player, "quest_no_repeat").replace("%quest_name%", def.name)));
             return;
@@ -590,8 +571,7 @@ public final class Engine {
     public void shutdown() {
         try {
             worker.shutdownNow();
-        } catch (Throwable ignored) {
-        }
+        } catch (Throwable ignored) {}
         conditionCache.clear();
         playerLocks.clear();
         recentEventWindow.clear();
@@ -658,9 +638,7 @@ public final class Engine {
         if (!def.hasTarget()) return true;
         if (matcher == null) return true;
         for (String t : def.targets) {
-            if (matcher.test(player, event, t)) {
-                return true;
-            }
+            if (matcher.test(player, event, t)) return true;
         }
         return false;
     }
@@ -676,48 +654,16 @@ public final class Engine {
         });
     }
 
-    private boolean checkTokens(String value, QuestDef def) {
-        if (!def.hasTarget()) return true;
-        if (value == null) value = "";
-        value = value.toUpperCase(Locale.ROOT);
-
-        for (String rawTarget : def.targets) {
-            if (rawTarget.equals("*")) return true;
-
-            Set<String> tokens = getParsedTokens(rawTarget);
-            if (tokens.contains(value)) return true;
-
-            String finalValue = value;
-            if (value.startsWith("/") && tokens.stream().anyMatch(t -> finalValue.startsWith(t) || finalValue.startsWith("/" + t))) {
-                return true;
-            }
-            if (tokens.stream().anyMatch(value::contains)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
     private boolean checkTokens(String value, String rawTarget) {
         if (rawTarget == null || rawTarget.isEmpty()) return true;
+        if (rawTarget.equals("*")) return true;
         Set<String> tokens = getParsedTokens(rawTarget);
-        if (tokens.contains(value)) return true;
-        if (rawTarget.contains("!")) return tokenAnyMatchLegacy(value, rawTarget);
-        return false;
-    }
-
-    private static boolean tokenAnyMatchLegacy(String value, String target) {
         String v = value.toUpperCase(Locale.ROOT);
-        String[] parts = target.split("\\|");
-        for (String tok : parts) {
-            tok = tok.trim();
-            if (tok.isEmpty()) continue;
-            boolean neg = tok.charAt(0) == '!';
-            if (neg) tok = tok.substring(1).trim();
-            String up = tok.toUpperCase(Locale.ROOT);
-            boolean eq = v.equals(up);
-            if (neg && eq) return false;
-            if (!neg && eq) return true;
+        if (tokens.contains(v)) return true;
+
+        for (String tok : tokens) {
+            if (tok.startsWith("!") && !v.equals(tok.substring(1))) return true;
+            if (v.contains(tok)) return true;
         }
         return false;
     }
@@ -727,38 +673,32 @@ public final class Engine {
 
         matchers.put("block_break", (player, event, target) -> {
             if (!(event instanceof BlockBreakEvent)) return false;
-            String type = ((BlockBreakEvent) event).getBlock().getType().name();
-            return checkTokens(type, target);
+            return checkTokens(((BlockBreakEvent) event).getBlock().getType().name(), target);
         });
         matchers.put("block_place", (player, event, target) -> {
             if (!(event instanceof BlockPlaceEvent)) return false;
-            String type = ((BlockPlaceEvent) event).getBlockPlaced().getType().name();
-            return checkTokens(type, target);
+            return checkTokens(((BlockPlaceEvent) event).getBlockPlaced().getType().name(), target);
         });
         matchers.put("entity_kill", (player, event, target) -> {
             if (!(event instanceof EntityDeathEvent)) return false;
-            String type = ((EntityDeathEvent) event).getEntity().getType().name();
-            return checkTokens(type, target);
+            return checkTokens(((EntityDeathEvent) event).getEntity().getType().name(), target);
         });
         matchers.put("mythicmobs_entity_kill", (player, event, target) -> {
             if (event instanceof MythicMobDeathEvent) {
-                String id = ((MythicMobDeathEvent) event).getMobType().getInternalName();
-                return checkTokens(id, target);
+                return checkTokens(((MythicMobDeathEvent) event).getMobType().getInternalName(), target);
             }
             return false;
         });
         matchers.put("player_command", (player, event, target) -> {
             if (!(event instanceof PlayerCommandPreprocessEvent e)) return false;
             String msgText = e.getMessage().toLowerCase(Locale.ROOT);
-            String rawTarget = target.toLowerCase(Locale.ROOT);
-            String cleanTarget = rawTarget.replaceAll("%[^%]+%", "").trim();
+            String cleanTarget = target.toLowerCase(Locale.ROOT).replaceAll("%[^%]+%", "").trim();
             String cmdBody = msgText.startsWith("/") ? msgText.substring(1) : msgText;
             return cmdBody.contains(cleanTarget);
         });
         matchers.put("player_chat", (player, event, target) -> {
             if (!(event instanceof AsyncPlayerChatEvent)) return false;
-            String msgText = ((AsyncPlayerChatEvent) event).getMessage().toLowerCase(Locale.ROOT);
-            return msgText.contains(target.toLowerCase(Locale.ROOT));
+            return ((AsyncPlayerChatEvent) event).getMessage().toLowerCase(Locale.ROOT).contains(target.toLowerCase(Locale.ROOT));
         });
     }
 
@@ -778,8 +718,7 @@ public final class Engine {
             if (def == null || def.reset == null) continue;
             if (!"DAILY".equalsIgnoreCase(def.reset.policy)) continue;
             String at = (def.reset.time == null || def.reset.time.isEmpty()) ? defaultTime : def.reset.time;
-            List<String> list = timeToQuestIds.computeIfAbsent(at, k -> new ArrayList<>());
-            list.add(id);
+            timeToQuestIds.computeIfAbsent(at, k -> new ArrayList<>()).add(id);
         }
         for (Map.Entry<String, List<String>> e : timeToQuestIds.entrySet()) {
             String time = e.getKey();
@@ -800,8 +739,7 @@ public final class Engine {
         try {
             h = Integer.parseInt(parts[0]);
             if (parts.length > 1) m = Integer.parseInt(parts[1]);
-        } catch (Throwable ignored) {
-        }
+        } catch (Throwable ignored) {}
         LocalDateTime now = LocalDateTime.now();
         LocalDateTime next = now.withHour(h).withMinute(m).withSecond(0).withNano(0);
         if (!next.isAfter(now)) next = next.plusDays(1);
@@ -822,7 +760,7 @@ public final class Engine {
         return k.replace("MythicMob", "MYTHICMOBS_").replace("Player", "PLAYER_").replace("Entity", "ENTITY_").replace("Block", "BLOCK_").toUpperCase(Locale.ROOT);
     }
 
-    private void rebuildCustomEventIndex() {
+    public void rebuildCustomEventIndex() {
         customEventIndex.clear();
         Map<String, List<QuestDef>> tmp = new HashMap<>();
         for (QuestDef def : quests.all()) {
@@ -833,6 +771,7 @@ public final class Engine {
         }
         for (Map.Entry<String, List<QuestDef>> e : tmp.entrySet()) {
             customEventIndex.put(e.getKey(), e.getValue().toArray(new QuestDef[0]));
+            plugin.getLogger().info("[QuestEngine] Indexed custom event: " + e.getKey() + " for " + e.getValue().size() + " quests.");
         }
     }
 
@@ -891,8 +830,11 @@ public final class Engine {
                 for (String part : parts) {
                     String name = part.trim();
                     if (name.isEmpty()) return null;
-                    int idx = name.indexOf('(');
-                    if (idx >= 0) name = name.substring(0, idx).trim();
+                    if (name.endsWith("()")) name = name.substring(0, name.length() - 2);
+                    else {
+                        int idx = name.indexOf('(');
+                        if (idx >= 0) name = name.substring(0, idx).trim();
+                    }
                     Method m = findNoArgMethod(current, name);
                     if (m == null) return null;
                     m.setAccessible(true);
@@ -924,10 +866,7 @@ public final class Engine {
         if (tasks == null || tasks.isEmpty()) return;
         Bukkit.getScheduler().runTask(plugin, () -> {
             for (Runnable r : tasks) {
-                try {
-                    r.run();
-                } catch (Throwable ignored) {
-                }
+                try { r.run(); } catch (Throwable ignored) {}
             }
         });
     }

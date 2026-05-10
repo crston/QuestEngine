@@ -234,7 +234,8 @@ public final class QuestEditorMenu implements Listener {
                 inv.setItem(12, listItem(p, "gui.editor.display.description.label", d.displayDescription));
                 inv.setItem(14, iconItem(p, d));
                 inv.setItem(16, textItem(p, "gui.editor.display.progress.label", d.displayProgress));
-                inv.setItem(19, numberItem(p, "gui.editor.display.cmd.label", d.displayCustomModelData));
+                // customModelData -> model 명칭 반영 및 문자열 표시
+                inv.setItem(19, textItem(p, "gui.editor.display.model.label", d.displayModel));
                 inv.setItem(21, textItem(p, "gui.editor.display.hint.label", d.displayHint));
                 inv.setItem(23, textItem(p, "gui.editor.display.reward.label", d.displayReward));
                 inv.setItem(25, textItem(p, "gui.editor.display.category.label", d.displayCategory));
@@ -266,7 +267,7 @@ public final class QuestEditorMenu implements Listener {
                 int[] slots = {10, 12, 14, 19, 21, 23, 28, 30};
                 ActionGroup[] grps = ActionGroup.values();
                 for (int i = 0; i < grps.length && i < slots.length; i++) {
-                    inv.setItem(slots[i], new ItemBuilder(Material.BOOK).setName(m(p, "gui.editor.actions.group." + grps[i].key)).setLore(Arrays.asList(m(p, "gui.editor.actions.lines").replace("%count%", String.valueOf(d.actions.getOrDefault(grps[i].key, List.of()).size())), "", m(p, "gui.editor.actions.left"), m(p, "gui.editor.actions.right"))).hideAllFlags().build());
+                    inv.setItem(slots[i], new ItemBuilder(Material.BOOK).setName(m(p, "gui.editor.actions.group." + grps[i].key)).setLore(Arrays.asList(m(p, "gui.editor.actions.lines").replace("%count%", String.valueOf(d.actions.getOrDefault(grps[i].key, List.of()).size())), "", m(p, "gui.editor.common.text.left"), m(p, "gui.editor.common.text.right"))).hideAllFlags().build());
                 }
                 inv.setItem(40, new ItemBuilder(Material.MAP).setName(m(p, "gui.editor.actions.help.title")).setLore(mL(p, "gui.editor.actions.help.lore")).hideAllFlags().build());
             }
@@ -299,12 +300,15 @@ public final class QuestEditorMenu implements Listener {
     private ItemStack numberItem(Player p, String k, int v) { return new ItemBuilder(Material.REPEATER).setName(m(p, "gui.editor.common.number.name").replace("%label%", m(p, k))).setLore(Arrays.asList(m(p, "gui.editor.common.number.value").replace("%value%", String.valueOf(v)), "", m(p, "gui.editor.common.number.edit"))).hideAllFlags().build(); }
     private ItemStack booleanItem(Player p, String k, boolean v) { return new ItemBuilder(v ? Material.LIME_DYE : Material.GRAY_DYE).setName(m(p, "gui.editor.common.boolean.name").replace("%label%", m(p, k))).setLore(Arrays.asList(m(p, "gui.editor.common.boolean.value").replace("%value%", String.valueOf(v)), "", m(p, "gui.editor.common.boolean.edit"))).hideAllFlags().build(); }
     private ItemStack listItem(Player p, String k, List<String> l) { return new ItemBuilder(Material.BOOK).setName(m(p, "gui.editor.common.list.name").replace("%label%", m(p, k))).setLore(Arrays.asList(m(p, "gui.editor.common.list.entries").replace("%count%", String.valueOf(l == null ? 0 : l.size())), "", m(p, "gui.editor.common.list.edit"))).hideAllFlags().build(); }
+
     private ItemStack iconItem(Player p, QuestEditorDraft d) {
         Material m = Material.getMaterial(d.displayIcon.toUpperCase(Locale.ROOT));
         if (m == null) m = Material.BOOK;
-        ItemBuilder b = new ItemBuilder(m).setName(m(p, "gui.editor.display.icon.name")).setLore(mL(p, "gui.editor.display.icon.lore")).hideAllFlags();
-        if (d.displayCustomModelData != -1) b.setModelData(d.displayCustomModelData);
-        return b.build();
+        return new ItemBuilder(m)
+                .setName(m(p, "gui.editor.display.icon.name"))
+                .setLore(mL(p, "gui.editor.display.icon.lore"))
+                .setModel(d.displayModel) // 변경된 String model 필드 사용
+                .hideAllFlags().build();
     }
 
     private void ensureActionGroups(QuestEditorDraft d) { for (ActionGroup g : ActionGroup.values()) d.actions.computeIfAbsent(g.key, k -> new ArrayList<>()); }
@@ -356,7 +360,15 @@ public final class QuestEditorMenu implements Listener {
         }
         if (s.tab == EditorTab.DISPLAY && slot >= SIZE && e.getCurrentItem() != null) {
             s.draft.displayIcon = e.getCurrentItem().getType().name();
-            s.draft.displayCustomModelData = e.getCurrentItem().hasItemMeta() && e.getCurrentItem().getItemMeta().hasCustomModelData() ? e.getCurrentItem().getItemMeta().getCustomModelData() : -1;
+            // 아이템 클릭 시 모델 정보 추출 로직 (String 호환)
+            if (e.getCurrentItem().hasItemMeta()) {
+                var meta = e.getCurrentItem().getItemMeta();
+                if (meta.hasCustomModelData()) {
+                    s.draft.displayModel = String.valueOf(meta.getCustomModelData());
+                } else {
+                    s.draft.displayModel = "-1";
+                }
+            }
             openMainDelayed(p, s);
             return;
         }
@@ -377,16 +389,19 @@ public final class QuestEditorMenu implements Listener {
             case DISPLAY -> {
                 if (slot == 10) promptOrClear(p, L, R, d.displayTitle, v -> d.displayTitle = v);
                 else if (slot == 12 && L) openListDelayed(p, "display.description");
-                else if (slot == 14) promptOrClear(p, L, R, "BOOK", v -> { d.displayIcon = v.toUpperCase(Locale.ROOT); d.displayCustomModelData = -1; });
+                else if (slot == 14) promptOrClear(p, L, R, "BOOK", v -> { d.displayIcon = v.toUpperCase(Locale.ROOT); d.displayModel = "-1"; });
                 else if (slot == 16) promptOrClear(p, L, R, "&7%value%/%target%", v -> d.displayProgress = v);
-                else if (slot == 19 && L) { p.closeInventory(); ChatInput.await(p, m(p, "gui.editor.prompt.display_cmd"), (pl, v) -> { try { d.displayCustomModelData = Integer.parseInt(v.trim()); } catch(Exception ignored){d.displayCustomModelData=-1;} openMainDelayed(pl, sessions.get(pl.getUniqueId())); }); }
-                else if (slot == 21) {
-                    p.closeInventory();
-                    ChatInput.await(p, m(p, "gui.editor.prompt.display_hint"), (pl, v) -> {
-                        d.displayHint = v;
-                        openMainDelayed(pl, sessions.get(pl.getUniqueId()));
-                    });
+                else if (slot == 19) {
+                    if (R) { d.displayModel = "-1"; openMainDelayed(p, s); }
+                    else if (L) {
+                        p.closeInventory();
+                        ChatInput.await(p, m(p, "gui.editor.prompt.display_model"), (pl, v) -> {
+                            d.displayModel = v.trim();
+                            openMainDelayed(pl, sessions.get(pl.getUniqueId()));
+                        });
+                    }
                 }
+                else if (slot == 21) promptOrClear(p, L, R, "", v -> d.displayHint = v);
                 else if (slot == 23) promptOrClear(p, L, R, "", v -> d.displayReward = v);
                 else if (slot == 25) promptOrClear(p, L, R, "", v -> d.displayCategory = v);
                 else if (slot == 28) promptOrClear(p, L, R, "", v -> d.displayDifficulty = v);

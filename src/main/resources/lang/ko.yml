@@ -167,8 +167,8 @@ gui:
         label: "설명 (Lore)"
       progress:
         label: "진행도 형식"
-      cmd:
-        label: "커스텀 모델 데이터"
+      model:
+        label: "커스텀 모델 데이터 / 아이템 모델"
       hint:
         label: "힌트 명령어"
       reward:

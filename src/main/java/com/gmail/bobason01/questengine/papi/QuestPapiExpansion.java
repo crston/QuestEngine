@@ -158,7 +158,7 @@ public final class QuestPapiExpansion extends PlaceholderExpansion {
                 yield "";
             }
             case "icon" -> q.display != null && q.display.icon != null ? q.display.icon : "BOOK";
-            case "cmd" -> q.display != null ? String.valueOf(q.display.customModelData) : "0";
+            case "cmd" -> q.display != null ? String.valueOf(q.display.model) : "0";
             case "party" -> String.valueOf(q.party);
             case "points" -> String.valueOf(q.points);
             case "target" -> String.valueOf(q.amount);

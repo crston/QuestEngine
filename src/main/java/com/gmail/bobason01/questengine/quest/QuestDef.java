@@ -80,8 +80,6 @@ public final class QuestDef {
         this.hash = Objects.hash(this.id, this.event, this.amount, this.points);
     }
 
-    // --- Static Helpers ---
-
     private static List<String> safeList(List<String> list) {
         return (list == null || list.isEmpty()) ? List.of() : List.copyOf(list);
     }
@@ -120,8 +118,6 @@ public final class QuestDef {
         }
         return false;
     }
-
-    // --- IO / Loader ---
 
     public static QuestDef load(File file) {
         YamlConfiguration yml = YamlConfiguration.loadConfiguration(file);
@@ -210,7 +206,6 @@ public final class QuestDef {
             if (!q.display.progress.isEmpty()) yml.set("display.progress", q.display.progress);
             if (!q.display.reward.isEmpty()) yml.set("display.reward", q.display.reward);
 
-            // Fixed Symbol Errors: Saving Category, Difficulty, Hint
             if (!q.display.category.isEmpty()) yml.set("display.category", q.display.category);
             if (!q.display.difficulty.isEmpty()) yml.set("display.difficulty", q.display.difficulty);
             if (!q.display.hint.isEmpty()) yml.set("display.hint", q.display.hint);
@@ -219,7 +214,8 @@ public final class QuestDef {
             if (!q.display.leftClickTip.isEmpty()) yml.set("display.left_click_tip", q.display.leftClickTip);
             if (!q.display.leftClickCommand.isEmpty()) yml.set("display.left_click_command", q.display.leftClickCommand);
 
-            if (q.display.customModelData != -1) yml.set("display.custommodeldata", q.display.customModelData);
+            // displayModel을 문자열로 저장 (숫자 형태라도 문자열로 저장됨)
+            if (!q.display.model.equals("-1")) yml.set("display.model", q.display.model);
         }
 
         if (!q.condStart.isEmpty()) yml.set("conditions.start", q.condStart);
@@ -237,14 +233,13 @@ public final class QuestDef {
         return yml;
     }
 
-    // --- Inner Classes ---
-
     public static final class Display {
         public final String title, progress, reward, icon;
-        public final String category, difficulty, hint; // Resolved Symbols
+        public final String category, difficulty, hint;
         public final String leftClickTip, leftClickCommand;
         public final List<String> description;
-        public final int customModelData;
+        // int customModelData에서 String model로 변경
+        public final String model;
 
         public Display(Map<String, Object> map) {
             this.title = (String) map.getOrDefault("title", "&fNo Title");
@@ -252,7 +247,6 @@ public final class QuestDef {
             this.progress = (String) map.getOrDefault("progress", "&7%value%/%target%");
             this.reward = (String) map.getOrDefault("reward", "");
 
-            // Fixed Symbol Errors: Mapping from YAML Map
             this.category = (String) map.getOrDefault("category", "");
             this.difficulty = (String) map.getOrDefault("difficulty", "");
             this.hint = (String) map.getOrDefault("hint", "");
@@ -261,7 +255,11 @@ public final class QuestDef {
             this.leftClickTip = (String) map.getOrDefault("left_click_tip", "");
             this.leftClickCommand = (String) map.getOrDefault("left_click_command", "");
 
-            this.customModelData = map.get("custommodeldata") instanceof Number n ? n.intValue() : -1;
+            // model 키를 먼저 확인하고 없으면 구버전 키(custommodeldata) 확인
+            Object modelObj = map.get("model");
+            if (modelObj == null) modelObj = map.get("custommodeldata");
+
+            this.model = (modelObj != null) ? String.valueOf(modelObj) : "-1";
         }
 
         @SuppressWarnings("unchecked")

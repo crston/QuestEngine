@@ -2,6 +2,7 @@ package com.gmail.bobason01.questengine.gui;
 
 import com.gmail.bobason01.questengine.QuestEnginePlugin;
 import com.gmail.bobason01.questengine.quest.QuestDef;
+import com.gmail.bobason01.questengine.util.ItemBuilder; // ItemBuilder 활용
 import org.bukkit.*;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -44,7 +45,6 @@ public final class PublicQuestMenu implements Listener {
         Inventory inv = Bukkit.createInventory(holder, 54, title);
         holder.setInventory(inv);
 
-        // [수정] 배경 채우기 (이름 없는 유리판 사용)
         fill(inv);
 
         drawTopBar(p, inv);
@@ -56,24 +56,20 @@ public final class PublicQuestMenu implements Listener {
         p.openInventory(inv);
     }
 
-    // [추가] 배경 채우기 메서드 (QuestListMenu와 동일하게 이름 숨김)
     private void fill(Inventory inv) {
-        ItemStack filler = createIcon(Material.GRAY_STAINED_GLASS_PANE, " ", -1);
+        ItemStack filler = createIcon(Material.GRAY_STAINED_GLASS_PANE, " ", "-1");
         for (int i = 0; i < inv.getSize(); i++) {
             inv.setItem(i, filler);
         }
     }
 
-    // [헬퍼] 아이템 생성 (이름 및 모델 데이터 적용)
-    private ItemStack createIcon(Material m, String name, int model) {
-        ItemStack item = new ItemStack(m == null ? Material.BOOK : m);
-        ItemMeta meta = item.getItemMeta();
-        if (meta != null) {
-            meta.setDisplayName(ChatColor.translateAlternateColorCodes('&', name));
-            if (model > 0) meta.setCustomModelData(model);
-            item.setItemMeta(meta);
-        }
-        return item;
+    // [수정] model 매개변수를 String으로 변경하여 ItemBuilder의 setModel 활용
+    private ItemStack createIcon(Material m, String name, String model) {
+        return new ItemBuilder(m == null ? Material.BOOK : m)
+                .setName(name)
+                .setModel(model)
+                .hideAllFlags()
+                .build();
     }
 
     private void drawQuests(Player p, Inventory inv, int page) {
@@ -128,20 +124,24 @@ public final class PublicQuestMenu implements Listener {
         }
     }
 
+    // [수정] q.display.model (String) 사용 및 ItemBuilder 적용
     private ItemStack createQuestIcon(QuestDef q, List<String> lore) {
         Material mat = Material.BOOK;
         if (q.display != null && q.display.icon != null) {
             try { mat = Material.valueOf(q.display.icon.toUpperCase(Locale.ROOT)); } catch (Exception ignored) {}
         }
 
-        ItemStack item = new ItemStack(mat);
+        ItemBuilder builder = new ItemBuilder(mat)
+                .setName("&f" + displayNameOf(q))
+                .setLore(lore);
+
+        if (q.display != null) {
+            builder.setModel(q.display.model);
+        }
+
+        ItemStack item = builder.build();
         ItemMeta meta = item.getItemMeta();
         if (meta != null) {
-            meta.setDisplayName(ChatColor.translateAlternateColorCodes('&', "&f" + displayNameOf(q)));
-            meta.setLore(lore);
-            if (q.display != null && q.display.customModelData > 0) {
-                meta.setCustomModelData(q.display.customModelData);
-            }
             meta.getPersistentDataContainer().set(questIdKey, PersistentDataType.STRING, q.id);
             item.setItemMeta(meta);
         }
@@ -150,39 +150,37 @@ public final class PublicQuestMenu implements Listener {
 
     @EventHandler
     public void onClick(InventoryClickEvent e) {
-        if (!(e.getInventory().getHolder() instanceof GuiHolder gh)) return;
+        if (!(e.getWhoClicked() instanceof Player player) || !(e.getInventory().getHolder() instanceof GuiHolder gh)) return;
         if (!"Q_PUBLIC".equals(gh.id())) return;
 
         e.setCancelled(true);
-        if (!(e.getWhoClicked() instanceof Player p)) return;
-
         int slot = e.getRawSlot();
-        int page = plugin.gui().getSession(p, "public_page") instanceof Integer i ? i : 0;
+        int page = plugin.gui().getSession(player, "public_page") instanceof Integer i ? i : 0;
 
         if (slot == 0 && isBtn("back")) {
-            plugin.gui().sound(p, "click");
-            Bukkit.getScheduler().runTaskLater(plugin, () -> plugin.gui().openList(p, 0), 1L);
+            plugin.gui().sound(player, "click");
+            Bukkit.getScheduler().runTaskLater(plugin, () -> plugin.gui().openList(player, 0), 1L);
             return;
         }
         if (slot == 8 && isBtn("search")) {
-            p.closeInventory();
-            ChatInput.await(p, getMsg("gui.public.search_prompt", "Enter keyword:"), (pp, text) -> {
+            player.closeInventory();
+            ChatInput.await(player, getMsg("gui.public.search_prompt", "Enter keyword:"), (pp, text) -> {
                 setSearch(pp, text);
                 Bukkit.getScheduler().runTask(plugin, () -> open(pp, 0));
             });
-            plugin.gui().sound(p, "click");
+            plugin.gui().sound(player, "click");
             return;
         }
         if (slot == 45 && isBtn("prev")) {
             if (page > 0) {
-                plugin.gui().sound(p, "page");
-                Bukkit.getScheduler().runTaskLater(plugin, () -> open(p, page - 1), 1L);
+                plugin.gui().sound(player, "page");
+                Bukkit.getScheduler().runTaskLater(plugin, () -> open(player, page - 1), 1L);
             }
             return;
         }
         if (slot == 53 && isBtn("next")) {
-            plugin.gui().sound(p, "page");
-            Bukkit.getScheduler().runTaskLater(plugin, () -> open(p, page + 1), 1L);
+            plugin.gui().sound(player, "page");
+            Bukkit.getScheduler().runTaskLater(plugin, () -> open(player, page + 1), 1L);
             return;
         }
 
@@ -193,12 +191,12 @@ public final class PublicQuestMenu implements Listener {
                 QuestDef q = plugin.engine().quests().get(qid);
                 if (q != null && e.getClick().isLeftClick()) {
                     try {
-                        plugin.engine().startQuest(p, q);
-                        plugin.gui().sound(p, "success");
-                        Bukkit.getScheduler().runTaskLater(plugin, () -> open(p, page), 1L);
+                        plugin.engine().startQuest(player, q);
+                        plugin.gui().sound(player, "success");
+                        Bukkit.getScheduler().runTaskLater(plugin, () -> open(player, page), 1L);
                     } catch (Throwable t) {
-                        p.sendMessage(getMsg("gui.public.error_accept", "&cError accepting quest."));
-                        plugin.gui().sound(p, "cancel");
+                        player.sendMessage(getMsg("gui.public.error_accept", "&cError accepting quest."));
+                        plugin.gui().sound(player, "cancel");
                     }
                 }
             }
@@ -231,7 +229,8 @@ public final class PublicQuestMenu implements Listener {
     private ItemStack icon(String key, String langKey) {
         String path = "gui.public.icons." + key;
         Material mat = Material.matchMaterial(plugin.getConfig().getString(path + ".material", "BOOK"));
-        int model = plugin.getConfig().getInt(path + ".model", -1);
+        // 설정에서 model을 String으로 가져옴 (숫자 또는 nexo:tomato 형태 지원)
+        String model = plugin.getConfig().getString(path + ".model", "-1");
         String name = getMsg(langKey, langKey);
         return createIcon(mat, name, model);
     }

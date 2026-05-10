@@ -2,6 +2,7 @@ package com.gmail.bobason01.questengine.gui;
 
 import com.gmail.bobason01.questengine.QuestEnginePlugin;
 import com.gmail.bobason01.questengine.quest.QuestDef;
+import com.gmail.bobason01.questengine.util.ItemBuilder; // ItemBuilder 활용
 import org.bukkit.*;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -105,17 +106,24 @@ public final class QuestListMenu implements Listener {
         }
     }
 
+    // q.display.model (String) 사용 및 ItemBuilder 적용
     private ItemStack createQuestIcon(QuestDef d, List<String> lore) {
         Material mat = Material.BOOK;
         if (d.display.icon != null) {
             try { mat = Material.valueOf(d.display.icon.toUpperCase(Locale.ROOT)); } catch (Exception ignored) {}
         }
-        ItemStack item = new ItemStack(mat);
+
+        ItemBuilder builder = new ItemBuilder(mat)
+                .setName("&f" + (d.display.title != null ? d.display.title : d.id))
+                .setLore(lore);
+
+        if (d.display.model != null) {
+            builder.setModel(d.display.model);
+        }
+
+        ItemStack item = builder.build();
         ItemMeta meta = item.getItemMeta();
         if (meta != null) {
-            meta.setDisplayName(ChatColor.translateAlternateColorCodes('&', "&f" + (d.display.title != null ? d.display.title : d.id)));
-            meta.setLore(lore);
-            if (d.display.customModelData > 0) meta.setCustomModelData(d.display.customModelData);
             meta.getPersistentDataContainer().set(questIdKey, PersistentDataType.STRING, d.id);
             item.setItemMeta(meta);
         }
@@ -124,49 +132,47 @@ public final class QuestListMenu implements Listener {
 
     @EventHandler
     public void onClick(InventoryClickEvent e) {
-        if (!(e.getInventory().getHolder() instanceof GuiHolder gh)) return;
+        if (!(e.getWhoClicked() instanceof Player player) || !(e.getInventory().getHolder() instanceof GuiHolder gh)) return;
         if (!"Q_LIST".equals(gh.id())) return;
 
         e.setCancelled(true);
-        if (!(e.getWhoClicked() instanceof Player p)) return;
-
         int slot = e.getRawSlot();
-        int page = getCurrentPage(p, e);
+        int page = getCurrentPage(player, e);
 
         if (slot == 0) {
-            p.closeInventory();
-            ChatInput.await(p, plugin.msg().get(p, "gui.list.search_prompt"), (pp, text) -> {
+            player.closeInventory();
+            ChatInput.await(player, plugin.msg().get(player, "gui.list.search_prompt"), (pp, text) -> {
                 setSearch(pp, text);
                 Bukkit.getScheduler().runTask(plugin, () -> open(pp, 0));
             });
-            plugin.gui().sound(p, "click");
+            plugin.gui().sound(player, "click");
         }
-        else if (slot == 1) { plugin.gui().openLeaderboard(p); plugin.gui().sound(p, "click"); }
-        else if (slot == 2) { plugin.gui().openPublic(p, 0); plugin.gui().sound(p, "click"); }
+        else if (slot == 1) { plugin.gui().openLeaderboard(player); plugin.gui().sound(player, "click"); }
+        else if (slot == 2) { plugin.gui().openPublic(player, 0); plugin.gui().sound(player, "click"); }
         else if (slot == 3 && isBtn("language")) {
-            plugin.gui().openLanguageMenu(p);
-            plugin.gui().sound(p, "click");
+            plugin.gui().openLanguageMenu(player);
+            plugin.gui().sound(player, "click");
         }
         else if (slot == 8) {
-            plugin.gui().putSession(p, "list_sort_asc", !getAsc(p));
-            Bukkit.getScheduler().runTaskLater(plugin, () -> open(p, page), 1L);
-            plugin.gui().sound(p, "page");
+            plugin.gui().putSession(player, "list_sort_asc", !getAsc(player));
+            Bukkit.getScheduler().runTaskLater(plugin, () -> open(player, page), 1L);
+            plugin.gui().sound(player, "page");
         }
         else if (slot == 45 && page > 0) {
-            Bukkit.getScheduler().runTaskLater(plugin, () -> open(p, page - 1), 1L);
-            plugin.gui().sound(p, "page");
+            Bukkit.getScheduler().runTaskLater(plugin, () -> open(player, page - 1), 1L);
+            plugin.gui().sound(player, "page");
         }
         else if (slot == 53) {
-            Bukkit.getScheduler().runTaskLater(plugin, () -> open(p, page + 1), 1L);
-            plugin.gui().sound(p, "page");
+            Bukkit.getScheduler().runTaskLater(plugin, () -> open(player, page + 1), 1L);
+            plugin.gui().sound(player, "page");
         }
         else if (slot == 49) {
-            p.closeInventory();
-            ChatInput.await(p, plugin.msg().get(p, "gui.list.page_input_prompt"), (pp, text) -> {
+            player.closeInventory();
+            ChatInput.await(player, plugin.msg().get(player, "gui.list.page_input_prompt"), (pp, text) -> {
                 int dest = 0; try { dest = Math.max(0, Integer.parseInt(text.trim()) - 1); } catch (Exception ignored) {}
                 int finalDest = dest; Bukkit.getScheduler().runTaskLater(plugin, () -> open(pp, finalDest), 1L);
             });
-            plugin.gui().sound(p, "click");
+            plugin.gui().sound(player, "click");
         }
         else {
             ItemStack clicked = e.getCurrentItem();
@@ -183,46 +189,38 @@ public final class QuestListMenu implements Listener {
                     boolean handled = false;
 
                     if (q.display.leftClickTip != null && !q.display.leftClickTip.isEmpty()) {
-                        p.sendMessage(applyPlaceholders(p, q.display.leftClickTip));
+                        player.sendMessage(applyPlaceholders(player, q.display.leftClickTip));
                         handled = true;
                     }
                     if (q.display.leftClickCommand != null && !q.display.leftClickCommand.isEmpty()) {
-                        p.performCommand(applyPlaceholders(p, q.display.leftClickCommand));
+                        player.performCommand(applyPlaceholders(player, q.display.leftClickCommand));
                         handled = true;
                     }
 
-                    // Hint Command 무조건 명령어로 처리
                     if (!handled && q.display.hint != null && !q.display.hint.isEmpty()) {
                         String cmd = q.display.hint;
                         if (cmd.startsWith("/")) cmd = cmd.substring(1);
-
-                        // PAPI 및 변수 치환 후 실행
-                        p.performCommand(applyPlaceholders(p, cmd));
+                        player.performCommand(applyPlaceholders(player, cmd));
                     }
                 }
-                p.closeInventory();
-                plugin.gui().sound(p, "click");
+                player.closeInventory();
+                plugin.gui().sound(player, "click");
             }
             else if (e.getClick().isRightClick()) {
-                plugin.gui().putSession(p, "confirm_target", q);
-                plugin.gui().putSession(p, "confirm_back_page", page);
-                plugin.gui().confirm().open(p, q);
-                plugin.gui().sound(p, "click");
+                plugin.gui().putSession(player, "confirm_target", q);
+                plugin.gui().putSession(player, "confirm_back_page", page);
+                plugin.gui().confirm().open(player, q);
+                plugin.gui().sound(player, "click");
             }
         }
     }
 
     private String applyPlaceholders(Player p, String text) {
         if (text == null || text.isEmpty()) return "";
-
-        // 기본 색상 및 플레이어 이름 치환
         text = ChatColor.translateAlternateColorCodes('&', text.replace("%player%", p.getName()));
-
-        // PlaceholderAPI 연동
         if (Bukkit.getPluginManager().isPluginEnabled("PlaceholderAPI")) {
             return me.clip.placeholderapi.PlaceholderAPI.setPlaceholders(p, text);
         }
-
         return text;
     }
 
@@ -259,24 +257,23 @@ public final class QuestListMenu implements Listener {
     private ItemStack icon(Player p, String key, String langKey) {
         String path = "gui.icons." + key;
         Material mat = Material.matchMaterial(plugin.getConfig().getString(path + ".material", "BOOK"));
-        int model = plugin.getConfig().getInt(path + ".model", -1);
+        // 설정에서 model을 String으로 가져옴 (숫자 또는 nexo:tomato 형태 지원)
+        String model = plugin.getConfig().getString(path + ".model", "-1");
         String name = plugin.msg().get(p, langKey);
         return createIcon(mat, name, model);
     }
 
-    private ItemStack createIcon(Material m, String name, int model) {
-        ItemStack item = new ItemStack(m == null ? Material.BOOK : m);
-        ItemMeta meta = item.getItemMeta();
-        if (meta != null) {
-            meta.setDisplayName(ChatColor.translateAlternateColorCodes('&', name));
-            if (model > 0) meta.setCustomModelData(model);
-            item.setItemMeta(meta);
-        }
-        return item;
+    // model 매개변수를 String으로 변경하여 ItemBuilder의 setModel 활용
+    private ItemStack createIcon(Material m, String name, String model) {
+        return new ItemBuilder(m == null ? Material.BOOK : m)
+                .setName(name)
+                .setModel(model)
+                .hideAllFlags()
+                .build();
     }
 
     private void fill(Inventory inv) {
-        ItemStack filler = createIcon(Material.GRAY_STAINED_GLASS_PANE, " ", -1);
+        ItemStack filler = createIcon(Material.GRAY_STAINED_GLASS_PANE, " ", "-1");
         for (int i = 0; i < inv.getSize(); i++) inv.setItem(i, filler);
     }
 

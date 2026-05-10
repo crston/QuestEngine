@@ -167,8 +167,8 @@ gui:
         label: "Description (Lore)"
       progress:
         label: "Progress Format"
-      cmd:
-        label: "Custom Model Data"
+      model:
+        label: "Custom Model Data / Item Model"
       hint:
         label: "Hint Command"
       reward:
