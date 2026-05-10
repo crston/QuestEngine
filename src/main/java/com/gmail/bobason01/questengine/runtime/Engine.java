@@ -589,7 +589,28 @@ public final class Engine {
         rebuildCustomEventIndex();
     }
 
-    private String format(Player p, String raw) {
+    /**
+     * 텍스트 내의 진행도 태그(%value%, %target%)를 실시간 수치로 치환합니다.
+     */
+    public String replaceProgressTags(Player p, String qid, String raw) {
+        if (raw == null || qid == null) return raw;
+        QuestDef q = quests.get(qid);
+        if (q == null) return raw;
+
+        // 1. 기본 태그 치환 (%value%, %target%)
+        int val = progress.value(p.getUniqueId(), p.getName(), qid);
+        String processed = raw.replace("%value%", String.valueOf(val))
+                .replace("%target%", String.valueOf(q.amount));
+
+        // 2. 외부 PAPI Placeholder 지원 추가 (예: %questengine_qid_...%)
+        if (hasPapi && p != null) {
+            processed = PlaceholderAPI.setPlaceholders(p, processed);
+        }
+
+        return processed;
+    }
+
+    public String format(Player p, String raw) {
         if (raw == null) return "";
         if (hasPapi && p != null) raw = PlaceholderAPI.setPlaceholders(p, raw);
         Matcher matcher = HEX_PATTERN.matcher(raw);

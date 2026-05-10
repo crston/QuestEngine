@@ -4,6 +4,7 @@ import com.gmail.bobason01.questengine.QuestEnginePlugin;
 import com.gmail.bobason01.questengine.progress.ProgressRepository;
 import com.gmail.bobason01.questengine.quest.QuestDef;
 import com.gmail.bobason01.questengine.quest.QuestRepository;
+import com.gmail.bobason01.questengine.runtime.Engine;
 import me.clip.placeholderapi.expansion.PlaceholderExpansion;
 import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
@@ -72,8 +73,9 @@ public final class QuestPapiExpansion extends PlaceholderExpansion {
     }
 
     private String compute(Player p, String id) {
-        ProgressRepository repo = plugin.engine().progress();
-        QuestRepository quests = plugin.engine().quests();
+        Engine engine = plugin.engine();
+        ProgressRepository repo = engine.progress();
+        QuestRepository quests = engine.quests();
         UUID uid = p.getUniqueId();
         String name = p.getName();
 
@@ -95,7 +97,7 @@ public final class QuestPapiExpansion extends PlaceholderExpansion {
                     if (index <= activeList.size()) {
                         String qid = activeList.get(index - 1);
                         QuestDef q = quests.get(qid);
-                        return q == null ? "" : getField(q, qid, parts[2], repo, uid, name);
+                        return q == null ? "" : getField(q, qid, parts[2], engine, p);
                     }
                 }
                 return "";
@@ -112,8 +114,6 @@ public final class QuestPapiExpansion extends PlaceholderExpansion {
 
                 QuestDef q = quests.get(qid);
 
-                // qid 안에 언더스코어가 포함되어 있는 퀘스트의 경우 예외 처리
-                // ex) qid_zombie_kill_1_title (qid: zombie_kill_1, field: title)
                 if (q == null) {
                     for (int i = sub.length() - 1; i > 0; i--) {
                         if (sub.charAt(i) == '_') {
@@ -121,12 +121,12 @@ public final class QuestPapiExpansion extends PlaceholderExpansion {
                             String potentialField = sub.substring(i + 1);
                             QuestDef potentialQ = quests.get(potentialQid);
                             if (potentialQ != null) {
-                                return getField(potentialQ, potentialQid, potentialField, repo, uid, name);
+                                return getField(potentialQ, potentialQid, potentialField, engine, p);
                             }
                         }
                     }
                 } else {
-                    return getField(q, qid, field, repo, uid, name);
+                    return getField(q, qid, field, engine, p);
                 }
             }
         }
@@ -134,15 +134,19 @@ public final class QuestPapiExpansion extends PlaceholderExpansion {
         return "";
     }
 
-    private String getField(QuestDef q, String qid, String field, ProgressRepository repo, UUID uid, String name) {
+    private String getField(QuestDef q, String qid, String field, Engine engine, Player p) {
+        ProgressRepository repo = engine.progress();
+        UUID uid = p.getUniqueId();
+        String name = p.getName();
+
         return switch (field) {
             case "id" -> q.id;
             case "name" -> q.name;
-            case "title" -> q.display != null ? ChatColor.translateAlternateColorCodes('&', q.display.title) : q.name;
-            case "reward" -> q.display != null ? ChatColor.translateAlternateColorCodes('&', q.display.reward) : "";
+            case "title" -> engine.replaceProgressTags(p, qid, ChatColor.translateAlternateColorCodes('&', q.display != null ? q.display.title : q.name));
+            case "reward" -> engine.replaceProgressTags(p, qid, ChatColor.translateAlternateColorCodes('&', q.display != null ? q.display.reward : ""));
             case "description" -> {
                 if (q.display != null && q.display.description != null && !q.display.description.isEmpty()) {
-                    yield ChatColor.translateAlternateColorCodes('&', q.display.description.get(0));
+                    yield engine.replaceProgressTags(p, qid, ChatColor.translateAlternateColorCodes('&', q.display.description.get(0)));
                 }
                 yield "";
             }
@@ -150,7 +154,7 @@ public final class QuestPapiExpansion extends PlaceholderExpansion {
                 if (q.display != null && q.display.description != null && !q.display.description.isEmpty()) {
                     StringBuilder descBuilder = new StringBuilder();
                     for (int i = 0; i < q.display.description.size(); i++) {
-                        descBuilder.append(ChatColor.translateAlternateColorCodes('&', q.display.description.get(i)));
+                        descBuilder.append(engine.replaceProgressTags(p, qid, ChatColor.translateAlternateColorCodes('&', q.display.description.get(i))));
                         if (i < q.display.description.size() - 1) descBuilder.append("\n");
                     }
                     yield descBuilder.toString();
