@@ -12,11 +12,9 @@ public final class QuestRepository {
     private final Plugin plugin;
     private final File dir;
 
-    // Volatile로 가시성 보장 (리로드 시 통째로 교체됨)
     private volatile Map<String, QuestDef> byId = Collections.emptyMap();
     private volatile Map<String, List<QuestDef>> byEvent = Collections.emptyMap();
 
-    // 빈 배열 캐싱 (GC 최적화)
     private static final QuestDef[] EMPTY_ARRAY = new QuestDef[0];
 
     public QuestRepository(Plugin plugin, File dir) {
@@ -30,9 +28,6 @@ public final class QuestRepository {
         reload();
     }
 
-    /**
-     * 퀘스트 전체 리로드 (Hot-Swap)
-     */
     public synchronized void reload() {
         File[] files = dir.listFiles((d, n) -> n.endsWith(".yml") || n.endsWith(".yaml"));
         if (files == null || files.length == 0) {
@@ -42,14 +37,12 @@ public final class QuestRepository {
             return;
         }
 
-        // 임시 맵 생성
         Map<String, QuestDef> newById = new HashMap<>(files.length);
         Map<String, List<QuestDef>> newByEvent = new HashMap<>();
 
         int count = 0;
         for (File f : files) {
             try {
-                // QuestDef.load가 최적화됨
                 QuestDef q = QuestDef.load(f);
                 if (q == null || q.id == null || q.id.isBlank()) {
                     plugin.getLogger().warning("[QuestEngine] Skipped invalid quest file: " + f.getName());
@@ -59,7 +52,6 @@ public final class QuestRepository {
                 String lid = q.id.toLowerCase(Locale.ROOT);
                 newById.put(lid, q);
 
-                // Event Map 구성
                 if (q.event != null && !q.event.isBlank()) {
                     String evtKey = q.event.trim().toUpperCase(Locale.ROOT);
                     newByEvent.computeIfAbsent(evtKey, k -> new ArrayList<>()).add(q);
@@ -71,24 +63,17 @@ public final class QuestRepository {
             }
         }
 
-        // Event Map 불변 리스트로 변환
         for (Map.Entry<String, List<QuestDef>> e : newByEvent.entrySet()) {
-            e.setValue(List.copyOf(e.getValue())); // Java 10+
+            e.setValue(List.copyOf(e.getValue()));
         }
 
-        // Atomic Swap (참조 교체)
-        this.byId = Map.copyOf(newById); // Java 10+
+        this.byId = Map.copyOf(newById);
         this.byEvent = Map.copyOf(newByEvent);
 
         plugin.getLogger().info("[QuestEngine] Loaded " + count + " quests (Hot-Swapped)");
     }
 
-    // --- Accessors (Thread-Safe via Volatile Swap) ---
-
     public void rebuildEventMap() {
-        // reload() 메서드 안에서 이미 수행되므로, 별도로 호출할 필요 없음.
-        // 하위 호환성을 위해 남겨두되, 실제로는 reload를 호출하거나 아무것도 안 함.
-        // 여기서는 reload가 이미 완료된 상태라고 가정하고 로그만 출력.
         plugin.getLogger().info("[QuestEngine] Event map is managed by reload()");
     }
 
@@ -122,7 +107,6 @@ public final class QuestRepository {
             YamlConfiguration yaml = QuestDef.toYaml(quest);
             yaml.save(out);
             plugin.getLogger().info("[QuestEngine] Saved quest " + quest.id);
-            // 저장 후 리로드는 호출자가 결정 (보통 에디터 저장 후 reload 호출함)
         } catch (IOException ex) {
             plugin.getLogger().warning("[QuestEngine] Failed to save quest " + quest.id + ": " + ex.getMessage());
         }

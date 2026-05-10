@@ -6,13 +6,8 @@ import java.util.*;
 
 public final class CustomEventData {
 
-    /** 이벤트 클래스의 FQCN (ex: org.bukkit.event.player.PlayerJoinEvent) */
     public final String eventClass;
-
-    /** 플레이어 객체를 가져올 메서드 경로 (예: getPlayer()) */
     public final String playerGetter;
-
-    /** %변수명% → 필드/메서드 체인 (ex: "%block_type%" -> "getBlock().getType().name()") */
     public final Map<String, String> captures;
 
     private static final Map<String, String> EMPTY_MAP = Collections.emptyMap();
@@ -64,9 +59,6 @@ public final class CustomEventData {
                 '}';
     }
 
-    // ------------------------------------------------------------
-    // 직렬화 (QuestDef.toYaml 등에서 사용)
-    // ------------------------------------------------------------
     public Map<String, Object> serialize() {
         Map<String, Object> out = new LinkedHashMap<>();
 
@@ -78,7 +70,6 @@ public final class CustomEventData {
             for (Map.Entry<String, String> e : captures.entrySet()) {
                 String key = e.getKey();
                 if (key != null && !key.isEmpty()) {
-                    // 저장 시 %변수명%;getSomething() 형태로 변환
                     lines.add("%" + key + "%;" + e.getValue());
                 }
             }

@@ -30,26 +30,20 @@ public final class ActionExecutor {
     private final boolean mmo;
     private final boolean ia;
 
-    // Reflection Handles MMOItems
     private static MethodHandle mmoGetItemMH;
     private static MethodHandle mmoGetTypeMH;
     private static Object mmoInstance;
 
-    // Reflection Handles ItemsAdder
     private static MethodHandle iaGetInstanceMH;
     private static MethodHandle iaGetItemStackMH;
 
-    // Action Cache
     private final Map<String, List<ActionEntry>> actionCache = new ConcurrentHashMap<>();
 
-    // 파라미터 파싱용 정규식 따옴표 매칭 완벽 지원
     private static final Pattern PARAM_PATTERN = Pattern.compile("([a-zA-Z]+)=('([^']*)'|\"([^\"]*)\"|([^\\s,]+))");
 
-    // 확장된 액션 타입들
     private enum ActionType { MESSAGE, COMMAND, ITEM, TITLE, SOUND, PARTICLE, POTION, UNKNOWN }
     private enum Target { SELF, SERVER }
 
-    // 유연한 속성 처리를 위해 Map 기반으로 구조 업그레이드
     private static final class ActionEntry {
         final ActionType type;
         final Map<String, String> params;
@@ -104,16 +98,20 @@ public final class ActionExecutor {
         }
     }
 
-    public void runAll(QuestDef q, String type, Player p) {
+    public void runAll(QuestDef q, String type, Player p, Map<String, Object> ctx) {
         if (q == null || q.actions == null || p == null) return;
         String cacheKey = q.id + type.toLowerCase(Locale.ROOT);
         List<ActionEntry> entries = actionCache.computeIfAbsent(cacheKey, k -> compileActions(q, type));
         if (entries.isEmpty()) return;
-        executeEntries(entries, q, p);
+        executeEntries(entries, q, p, ctx);
     }
 
-    public void run(QuestDef q, String type, Player p) {
-        runAll(q, type, p);
+    public void run(QuestDef q, String type, Player p, Map<String, Object> ctx) {
+        runAll(q, type, p, ctx);
+    }
+
+    public void runAll(QuestDef q, String type, Player p) {
+        runAll(q, type, p, null);
     }
 
     private List<ActionEntry> compileActions(QuestDef q, String type) {
@@ -184,23 +182,23 @@ public final class ActionExecutor {
         return new ActionEntry(type, params, delay, target);
     }
 
-    private void executeEntries(List<ActionEntry> list, QuestDef q, Player p) {
+    private void executeEntries(List<ActionEntry> list, QuestDef q, Player p, Map<String, Object> ctx) {
         if (list.isEmpty()) return;
 
         int index = 0;
         while (index < list.size()) {
             ActionEntry e = list.get(index);
             if (e.delay > 0) break;
-            executeOne(e, q, p);
+            executeOne(e, q, p, ctx);
             index++;
         }
 
         if (index < list.size()) {
-            scheduleNext(list, index, 0, q, p);
+            scheduleNext(list, index, 0, q, p, ctx);
         }
     }
 
-    private void scheduleNext(List<ActionEntry> list, int index, long elapsed, QuestDef q, Player p) {
+    private void scheduleNext(List<ActionEntry> list, int index, long elapsed, QuestDef q, Player p, Map<String, Object> ctx) {
         if (index >= list.size()) return;
 
         ActionEntry next = list.get(index);
@@ -215,28 +213,28 @@ public final class ActionExecutor {
             while (i < list.size()) {
                 ActionEntry e = list.get(i);
                 if (e.delay > currentTargetDelay) break;
-                executeOne(e, q, p);
+                executeOne(e, q, p, ctx);
                 i++;
             }
 
             if (i < list.size()) {
-                scheduleNext(list, i, currentTargetDelay, q, p);
+                scheduleNext(list, i, currentTargetDelay, q, p, ctx);
             }
         }, wait);
     }
 
-    private void executeOne(ActionEntry e, QuestDef q, Player p) {
+    private void executeOne(ActionEntry e, QuestDef q, Player p, Map<String, Object> ctx) {
         switch (e.type) {
             case MESSAGE -> {
                 String text = e.params.getOrDefault("m", e.params.getOrDefault("t", e.params.get("text")));
-                text = replace(p, text, q);
+                text = replace(p, text, q, ctx);
                 if (text != null && !text.isEmpty()) {
                     p.sendMessage(ChatColor.translateAlternateColorCodes('&', text));
                 }
             }
             case COMMAND -> {
                 String cmd = e.params.getOrDefault("c", e.params.get("cmd"));
-                cmd = replace(p, cmd, q);
+                cmd = replace(p, cmd, q, ctx);
                 if (cmd != null && !cmd.isEmpty()) {
                     if (e.target == Target.SERVER) {
                         Bukkit.dispatchCommand(Bukkit.getConsoleSender(), cmd);
@@ -259,8 +257,8 @@ public final class ActionExecutor {
                 }
             }
             case TITLE -> {
-                String title = replace(p, e.params.getOrDefault("t", e.params.getOrDefault("title", "")), q);
-                String subtitle = replace(p, e.params.getOrDefault("s", e.params.getOrDefault("subtitle", "")), q);
+                String title = replace(p, e.params.getOrDefault("t", e.params.getOrDefault("title", "")), q, ctx);
+                String subtitle = replace(p, e.params.getOrDefault("s", e.params.getOrDefault("subtitle", "")), q, ctx);
                 title = ChatColor.translateAlternateColorCodes('&', title);
                 subtitle = ChatColor.translateAlternateColorCodes('&', subtitle);
 
@@ -279,7 +277,6 @@ public final class ActionExecutor {
                     Sound sound = Sound.valueOf(soundName.toUpperCase(Locale.ROOT));
                     p.playSound(p.getLocation(), sound, vol, pitch);
                 } catch (Exception ex) {
-                    // Enum 에 없는 경우 리소스팩 커스텀 사운드로 간주하여 문자열로 재생
                     p.playSound(p.getLocation(), soundName, vol, pitch);
                 }
             }
@@ -309,9 +306,16 @@ public final class ActionExecutor {
         }
     }
 
-    private String replace(Player p, String s, QuestDef q) {
+    private String replace(Player p, String s, QuestDef q, Map<String, Object> ctx) {
         if (s == null) return "";
         String t = s.replace("player", p.getName()).replace("questname", q.name);
+
+        if (ctx != null && !ctx.isEmpty()) {
+            for (Map.Entry<String, Object> entry : ctx.entrySet()) {
+                t = t.replace("%" + entry.getKey() + "%", String.valueOf(entry.getValue()));
+            }
+        }
+
         if (papi) {
             return PlaceholderAPI.setPlaceholders(p, t);
         }

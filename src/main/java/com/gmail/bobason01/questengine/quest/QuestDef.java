@@ -10,7 +10,6 @@ public final class QuestDef {
 
     public enum StartMode { NONE, AUTO, PUBLIC, NPC }
 
-    // Core Metadata
     public final String id;
     public final String name;
     public final String event;
@@ -23,20 +22,16 @@ public final class QuestDef {
     public final String type;
     public final StartMode startMode;
 
-    // Components
     public final Reset reset;
     public final Display display;
     public final CustomEventData custom;
 
-    // Conditions
     public final List<String> condStart;
     public final List<String> condSuccess;
     public final List<String> condFail;
 
-    // Prerequisites
     public final List<String> requiredQuests;
 
-    // Actions & Chain
     public final Map<String, List<String>> actions;
     public final String nextQuestOnComplete;
 
@@ -214,7 +209,6 @@ public final class QuestDef {
             if (!q.display.leftClickTip.isEmpty()) yml.set("display.left_click_tip", q.display.leftClickTip);
             if (!q.display.leftClickCommand.isEmpty()) yml.set("display.left_click_command", q.display.leftClickCommand);
 
-            // displayModel을 문자열로 저장 (숫자 형태라도 문자열로 저장됨)
             if (!q.display.model.equals("-1")) yml.set("display.model", q.display.model);
         }
 
@@ -238,7 +232,6 @@ public final class QuestDef {
         public final String category, difficulty, hint;
         public final String leftClickTip, leftClickCommand;
         public final List<String> description;
-        // int customModelData에서 String model로 변경
         public final String model;
 
         public Display(Map<String, Object> map) {
@@ -255,7 +248,6 @@ public final class QuestDef {
             this.leftClickTip = (String) map.getOrDefault("left_click_tip", "");
             this.leftClickCommand = (String) map.getOrDefault("left_click_command", "");
 
-            // model 키를 먼저 확인하고 없으면 구버전 키(custommodeldata) 확인
             Object modelObj = map.get("model");
             if (modelObj == null) modelObj = map.get("custommodeldata");
 
