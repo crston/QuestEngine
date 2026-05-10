@@ -589,20 +589,15 @@ public final class Engine {
         rebuildCustomEventIndex();
     }
 
-    /**
-     * 텍스트 내의 진행도 태그(%value%, %target%)를 실시간 수치로 치환합니다.
-     */
     public String replaceProgressTags(Player p, String qid, String raw) {
         if (raw == null || qid == null) return raw;
         QuestDef q = quests.get(qid);
         if (q == null) return raw;
 
-        // 1. 기본 태그 치환 (%value%, %target%)
         int val = progress.value(p.getUniqueId(), p.getName(), qid);
         String processed = raw.replace("%value%", String.valueOf(val))
                 .replace("%target%", String.valueOf(q.amount));
 
-        // 2. 외부 PAPI Placeholder 지원 추가 (예: %questengine_qid_...%)
         if (hasPapi && p != null) {
             processed = PlaceholderAPI.setPlaceholders(p, processed);
         }
@@ -683,7 +678,7 @@ public final class Engine {
         if (tokens.contains(v)) return true;
 
         for (String tok : tokens) {
-            if (tok.startsWith("!") && !v.equals(tok.substring(1))) return true;
+            if (tok.startsWith("!") && !v.equals(tok.substring(1).toUpperCase(Locale.ROOT))) return true;
             if (v.contains(tok)) return true;
         }
         return false;
@@ -713,9 +708,15 @@ public final class Engine {
         matchers.put("player_command", (player, event, target) -> {
             if (!(event instanceof PlayerCommandPreprocessEvent e)) return false;
             String msgText = e.getMessage().toLowerCase(Locale.ROOT);
-            String cleanTarget = target.toLowerCase(Locale.ROOT).replaceAll("%[^%]+%", "").trim();
             String cmdBody = msgText.startsWith("/") ? msgText.substring(1) : msgText;
-            return cmdBody.contains(cleanTarget);
+
+            String[] args = cmdBody.split(" ");
+            String mainCommand = args[0];
+
+            String cleanTarget = target.toLowerCase(Locale.ROOT).trim();
+            if (cleanTarget.startsWith("/")) cleanTarget = cleanTarget.substring(1);
+
+            return mainCommand.equals(cleanTarget);
         });
         matchers.put("player_chat", (player, event, target) -> {
             if (!(event instanceof AsyncPlayerChatEvent)) return false;
