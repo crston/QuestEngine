@@ -32,6 +32,11 @@ public final class YamlStorage implements StorageProvider {
         PlayerData d = new PlayerData(id, name);
 
         for (String qid : yml.getKeys(false)) {
+            if (qid.equalsIgnoreCase("meta_language")) {
+                d.setLanguage(yml.getString(qid, "en"));
+                continue;
+            }
+
             boolean active = yml.getBoolean(qid + ".active", false);
             boolean completed = yml.getBoolean(qid + ".completed", false);
             int value = yml.getInt(qid + ".value", 0);
@@ -43,8 +48,7 @@ public final class YamlStorage implements StorageProvider {
             if (repeatCount > 0) d.setRepeatCount(qid, repeatCount);
 
             if (completed) {
-                d.complete(qid, points); // 완료 상태 설정
-                // 완료했는데 카운트가 0이면 보정
+                d.complete(qid, points);
                 if (d.getRepeatCount(qid) == 0) d.setRepeatCount(qid, 1);
             }
         }
@@ -56,7 +60,6 @@ public final class YamlStorage implements StorageProvider {
         File f = fileOf(d.getId());
         YamlConfiguration yml = new YamlConfiguration();
 
-        // 중복 제거를 위해 Set 사용
         Set<String> all = new HashSet<>();
         all.addAll(d.activeIds());
         all.addAll(d.completedIds());
@@ -68,6 +71,8 @@ public final class YamlStorage implements StorageProvider {
             yml.set(qid + ".points", d.pointsOf(qid));
             yml.set(qid + ".repeat_count", d.getRepeatCount(qid));
         }
+
+        yml.set("meta_language", d.getLanguage());
 
         try {
             yml.save(f);
@@ -85,11 +90,11 @@ public final class YamlStorage implements StorageProvider {
         for (File f : files) {
             try {
                 UUID id = UUID.fromString(f.getName().replace(".yml", ""));
-                // 전체 로드는 무거우므로, 포인트 계산만 빠르게 하기 위해선 별도 캐시 파일이 낫지만,
-                // 여기선 YAML 파싱을 최소화할 방법이 없으므로 그대로 진행
                 YamlConfiguration yml = YamlConfiguration.loadConfiguration(f);
                 int total = 0;
                 for (String qid : yml.getKeys(false)) {
+                    if (qid.equalsIgnoreCase("meta_language")) continue;
+
                     if (yml.getBoolean(qid + ".completed", false)) {
                         total += yml.getInt(qid + ".points", 0);
                     }
@@ -114,7 +119,7 @@ public final class YamlStorage implements StorageProvider {
         if (!f.exists()) return;
 
         YamlConfiguration yml = YamlConfiguration.loadConfiguration(f);
-        yml.set(questId, null); // 섹션 삭제
+        yml.set(questId, null);
         try {
             yml.save(f);
         } catch (IOException ignored) {}

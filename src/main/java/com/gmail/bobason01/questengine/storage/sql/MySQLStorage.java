@@ -17,18 +17,15 @@ public final class MySQLStorage extends AbstractSqlStorage {
         String pass = plugin.getConfig().getString("storage.mysql.password", "");
 
         HikariConfig config = new HikariConfig();
-        // MySQL 드라이버 클래스 지정 (명시적)
         config.setDriverClassName("com.mysql.cj.jdbc.Driver");
         config.setJdbcUrl("jdbc:mysql://" + host + ":" + port + "/" + db);
         config.setUsername(user);
         config.setPassword(pass);
 
-        // MySQL 필수/성능 파라미터
         config.addDataSourceProperty("useSSL", "false");
         config.addDataSourceProperty("characterEncoding", "utf8");
         config.addDataSourceProperty("serverTimezone", "UTC");
 
-        // 성능 최적화 설정 (MySQL 특화)
         config.addDataSourceProperty("cachePrepStmts", "true");
         config.addDataSourceProperty("prepStmtCacheSize", "250");
         config.addDataSourceProperty("prepStmtCacheSqlLimit", "2048");
@@ -56,11 +53,28 @@ public final class MySQLStorage extends AbstractSqlStorage {
     }
 
     @Override
+    protected String createMetaTableSql() {
+        return "CREATE TABLE IF NOT EXISTS qe_player_meta (" +
+                "uuid VARCHAR(36) NOT NULL," +
+                "language VARCHAR(16) NOT NULL," +
+                "PRIMARY KEY (uuid)" +
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
+    }
+
+    @Override
     protected String upsertSql() {
         return "INSERT INTO qe_progress (uuid, quest_id, active, completed, value, points, repeat_count) " +
                 "VALUES (?, ?, ?, ?, ?, ?, ?) " +
                 "ON DUPLICATE KEY UPDATE " +
                 "active=VALUES(active), completed=VALUES(completed), value=VALUES(value), " +
                 "points=VALUES(points), repeat_count=VALUES(repeat_count)";
+    }
+
+    @Override
+    protected String upsertMetaSql() {
+        return "INSERT INTO qe_player_meta (uuid, language) " +
+                "VALUES (?, ?) " +
+                "ON DUPLICATE KEY UPDATE " +
+                "language=VALUES(language)";
     }
 }

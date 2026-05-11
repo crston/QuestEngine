@@ -19,7 +19,6 @@ public final class SQLiteStorage extends AbstractSqlStorage {
         config.setDriverClassName("org.sqlite.JDBC");
         config.setJdbcUrl("jdbc:sqlite:" + f.getAbsolutePath());
 
-        // SQLite는 풀 사이즈 1이 안전함 (파일 락 때문)
         config.setMaximumPoolSize(1);
         config.setConnectionTestQuery("SELECT 1");
 
@@ -41,11 +40,28 @@ public final class SQLiteStorage extends AbstractSqlStorage {
     }
 
     @Override
+    protected String createMetaTableSql() {
+        return "CREATE TABLE IF NOT EXISTS qe_player_meta (" +
+                "uuid TEXT NOT NULL," +
+                "language TEXT NOT NULL," +
+                "PRIMARY KEY (uuid)" +
+                ")";
+    }
+
+    @Override
     protected String upsertSql() {
         return "INSERT INTO qe_progress (uuid, quest_id, active, completed, value, points, repeat_count) " +
                 "VALUES (?, ?, ?, ?, ?, ?, ?) " +
                 "ON CONFLICT(uuid, quest_id) DO UPDATE SET " +
                 "active=excluded.active, completed=excluded.completed, value=excluded.value, " +
                 "points=excluded.points, repeat_count=excluded.repeat_count";
+    }
+
+    @Override
+    protected String upsertMetaSql() {
+        return "INSERT INTO qe_player_meta (uuid, language) " +
+                "VALUES (?, ?) " +
+                "ON CONFLICT(uuid) DO UPDATE SET " +
+                "language=excluded.language";
     }
 }

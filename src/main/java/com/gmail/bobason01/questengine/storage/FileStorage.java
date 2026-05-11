@@ -49,12 +49,18 @@ public final class FileStorage implements StorageProvider {
                 if (repeatCount > 0) data.setRepeatCount(qid, repeatCount);
 
                 if (completed) {
-                    // 완료 상태 복구 (포인트 포함)
                     data.complete(qid, points);
-                    // 반복 횟수가 0인데 완료된 상태면 최소 1로 보정
                     if (data.getRepeatCount(qid) == 0) data.setRepeatCount(qid, 1);
                 }
             }
+
+            if (in.available() > 0) {
+                try {
+                    String lang = in.readUTF();
+                    data.setLanguage(lang);
+                } catch (EOFException ignored) {}
+            }
+
             return data;
         } catch (Throwable t) {
             plugin.getLogger().warning("[FileStorage] Load failed for " + id + ": " + t.getMessage());
@@ -79,20 +85,19 @@ public final class FileStorage implements StorageProvider {
                 out.writeBoolean(d.isCompleted(qid));
                 out.writeInt(d.valueOf(qid));
                 out.writeInt(d.pointsOf(qid));
-                // [Added] Repeat Count
                 out.writeInt(d.getRepeatCount(qid));
             }
 
-            // Flush & Close before move
+            out.writeUTF(d.getLanguage());
+
             out.flush();
             out.close();
 
-            // Atomic Move (Safe Replace)
             Files.move(tmp.toPath(), f.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
 
         } catch (Throwable t) {
             plugin.getLogger().warning("[FileStorage] Save failed for " + d.getId() + ": " + t.getMessage());
-            if (tmp.exists()) tmp.delete(); // cleanup
+            if (tmp.exists()) tmp.delete();
         }
     }
 
@@ -108,13 +113,12 @@ public final class FileStorage implements StorageProvider {
                 int total = 0;
                 int count = in.readInt();
                 for (int i = 0; i < count; i++) {
-                    in.readUTF(); // qid
-                    in.readBoolean(); // active
+                    in.readUTF();
+                    in.readBoolean();
                     boolean completed = in.readBoolean();
-                    in.readInt(); // value
+                    in.readInt();
                     int pts = in.readInt();
 
-                    // repeatCount skip (if exists)
                     if (in.available() >= 4) in.skipBytes(4);
 
                     if (completed) total += pts;

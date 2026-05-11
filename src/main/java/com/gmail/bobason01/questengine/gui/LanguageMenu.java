@@ -1,6 +1,7 @@
 package com.gmail.bobason01.questengine.gui;
 
 import com.gmail.bobason01.questengine.QuestEnginePlugin;
+import com.gmail.bobason01.questengine.progress.PlayerData;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
@@ -67,8 +68,11 @@ public final class LanguageMenu implements Listener {
 
         String code = lore.get(0).replace(ChatColor.GRAY + "Code: ", "").toLowerCase();
 
-        // 언어 변경 및 저장
-        plugin.progress().of(p.getUniqueId(), p.getName()).setLanguage(code);
+        // 언어 변경 및 저장 대기열에 등록 (핵심 수정 부분)
+        PlayerData data = plugin.progress().of(p.getUniqueId(), p.getName());
+        data.setLanguage(code);
+        plugin.progress().save(data); // ProgressRepository 에 저장을 지시하여 디스크/DB에 기록되게 함
+
         p.sendMessage(plugin.msg().get(p, "language_changed").replace("%lang%", code.toUpperCase()));
 
         p.closeInventory();
