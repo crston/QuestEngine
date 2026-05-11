@@ -35,12 +35,10 @@ public final class EventContextMapper {
     private static final MethodHandles.Lookup LOOKUP = MethodHandles.lookup();
     private static final MethodHandle NULL_HANDLE;
 
-    // MythicMobs 플러그인 존재 여부 캐싱
     private static final boolean HAS_MYTHIC;
 
     static {
         try {
-            // returnNull이 이제 public이므로 접근 권한 문제 해결
             NULL_HANDLE = LOOKUP.findStatic(EventContextMapper.class, "returnNull", java.lang.invoke.MethodType.methodType(Player.class, Event.class));
             HAS_MYTHIC = Bukkit.getPluginManager().getPlugin("MythicMobs") != null;
         } catch (Exception e) {
@@ -50,9 +48,6 @@ public final class EventContextMapper {
 
     public static Player returnNull(Event e) { return null; }
 
-    /**
-     * 이벤트에서 핵심 컨텍스트만 추출 (최소화)
-     */
     public static Map<String, Object> map(Event e) {
         if (e == null) return Collections.emptyMap();
 
@@ -72,9 +67,6 @@ public final class EventContextMapper {
         return ctx;
     }
 
-    /**
-     * MethodHandle을 사용한 고성능 Player 추출
-     */
     public static Player extractPlayer(Event e) {
         if (e == null) return null;
         Class<?> clz = e.getClass();
@@ -98,7 +90,6 @@ public final class EventContextMapper {
     private static Player findAndCachePlayerGetter(Class<?> clz, Event e) {
         MethodHandle target = NULL_HANDLE;
         try {
-            // 우선순위 1: getPlayer()
             try {
                 Method m = clz.getMethod("getPlayer");
                 if (Player.class.isAssignableFrom(m.getReturnType())) {
@@ -106,7 +97,6 @@ public final class EventContextMapper {
                 }
             } catch (NoSuchMethodException ignored) {}
 
-            // 우선순위 2: getWhoClicked()
             if (target == NULL_HANDLE) {
                 try {
                     Method m = clz.getMethod("getWhoClicked");
@@ -116,7 +106,6 @@ public final class EventContextMapper {
                 } catch (NoSuchMethodException ignored) {}
             }
 
-            // 우선순위 3: getEntity()가 Player인 경우
             if (target == NULL_HANDLE) {
                 try {
                     Method m = clz.getMethod("getEntity");

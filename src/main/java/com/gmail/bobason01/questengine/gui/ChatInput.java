@@ -20,7 +20,6 @@ public final class ChatInput implements Listener {
     private static ChatInput INSTANCE;
     private static QuestEnginePlugin plugin;
 
-    // 비동기 채팅 이벤트에서 접근하므로 ConcurrentHashMap 필수
     private final Map<UUID, BiConsumer<Player, String>> waiting = new ConcurrentHashMap<>();
 
     private ChatInput(QuestEnginePlugin pl) {
@@ -36,7 +35,7 @@ public final class ChatInput implements Listener {
 
     static ChatInput get() {
         if (INSTANCE == null) {
-            throw new IllegalStateException("ChatInput not initialized!");
+            throw new IllegalStateException("ChatInput not initialized");
         }
         return INSTANCE;
     }
@@ -55,20 +54,17 @@ public final class ChatInput implements Listener {
 
     @EventHandler(priority = EventPriority.LOWEST)
     public void onChat(AsyncPlayerChatEvent e) {
-        // 맵에 없으면 빠르게 리턴 (Fast-Path)
         if (waiting.isEmpty()) return;
 
         Player player = e.getPlayer();
         UUID uid = player.getUniqueId();
 
-        // containsKey 체크보다 remove가 원자적(Atomic)이라 더 안전함
         BiConsumer<Player, String> handler = waiting.remove(uid);
         if (handler == null) return;
 
         e.setCancelled(true);
         String msg = e.getMessage();
 
-        // 로직은 메인 스레드에서 실행 (스레드 안전성 보장)
         Bukkit.getScheduler().runTask(plugin, () -> {
             try {
                 handler.accept(player, msg);
@@ -79,7 +75,6 @@ public final class ChatInput implements Listener {
         });
     }
 
-    // [중요] 플레이어가 나가면 대기열에서 삭제해야 메모리 누수가 없음
     @EventHandler
     public void onQuit(PlayerQuitEvent e) {
         waiting.remove(e.getPlayer().getUniqueId());

@@ -15,46 +15,34 @@ public final class QuestGuiManager {
 
     private final QuestEnginePlugin plugin;
 
-    // Thread-safe session storage
     private final Map<UUID, Map<String, Object>> sessions = new ConcurrentHashMap<>();
 
-    // Menu Instances
     private final LeaderboardMenu leaderboardMenu;
     private final QuestListMenu questListMenu;
     private final PublicQuestMenu publicQuestMenu;
     private final QuestConfirmMenu confirmMenu;
-    private final LanguageMenu languageMenu; // [ADDED] Language selection support
+    private final LanguageMenu languageMenu;
 
     public QuestGuiManager(QuestEnginePlugin plugin) {
         this.plugin = plugin;
 
-        // Initialize Menus
         this.leaderboardMenu = new LeaderboardMenu(plugin);
         this.questListMenu = new QuestListMenu(plugin);
         this.publicQuestMenu = new PublicQuestMenu(plugin);
         this.confirmMenu = new QuestConfirmMenu(plugin);
-        this.languageMenu = new LanguageMenu(plugin); // [ADDED]
+        this.languageMenu = new LanguageMenu(plugin);
 
-        // Register protection listener
-        // new GuiProtectionListener(plugin);
-
-        plugin.getLogger().info("[QuestGuiManager] Initialized with Multi-Language support.");
+        plugin.getLogger().info("[QuestGuiManager] Initialized with Multi-Language support");
     }
-
-    // --- GUI Open Helpers (Fixed Arguments) ---
 
     public void openLeaderboard(Player p) {
         if (p != null) leaderboardMenu.open(p);
     }
 
-    /** * QuestCommand의 openList(p, 0) 호출과 호환되도록 수정됨
-     */
     public void openList(Player p, int page) {
         if (p != null) questListMenu.open(p, page);
     }
 
-    /** * QuestCommand의 openPublic(p, 0) 호출과 호환되도록 수정됨
-     */
     public void openPublic(Player p, int page) {
         if (p != null) publicQuestMenu.open(p, page);
     }
@@ -63,12 +51,9 @@ public final class QuestGuiManager {
         if (p != null && quest != null) confirmMenu.open(p, quest);
     }
 
-    /** [NEW] 언어 선택 메뉴 오픈 */
     public void openLanguageMenu(Player p) {
         if (p != null) languageMenu.open(p);
     }
-
-    // --- Session Management ---
 
     public void putSession(Player p, String key, Object value) {
         if (p == null || key == null) return;
@@ -90,8 +75,6 @@ public final class QuestGuiManager {
     public void clearSession(Player p) {
         if (p != null) sessions.remove(p.getUniqueId());
     }
-
-    // --- Utils ---
 
     public void sound(Player p, String type) {
         if (p == null || type == null) return;
@@ -117,7 +100,6 @@ public final class QuestGuiManager {
         }
     }
 
-    // --- Getters ---
     public QuestConfirmMenu confirm() { return confirmMenu; }
 
     public QuestListMenu list() {

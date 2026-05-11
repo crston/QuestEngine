@@ -10,8 +10,6 @@ import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.inventory.CraftItemEvent;
 import org.bukkit.event.player.PlayerFishEvent;
 
-import java.lang.invoke.MethodHandle;
-import java.lang.invoke.MethodHandles;
 import java.lang.reflect.Method;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -21,14 +19,10 @@ public final class ConditionEvaluator {
     private ConditionEvaluator() {}
 
     private static final boolean PAPI = Bukkit.getPluginManager().isPluginEnabled("PlaceholderAPI");
-
     private static final Map<String, Parsed> EXPR_CACHE = new ConcurrentHashMap<>(512);
-
-    private static final Map<String, MethodHandle[]> REFLECTION_CACHE = new ConcurrentHashMap<>();
-    private static final MethodHandles.Lookup LOOKUP = MethodHandles.publicLookup();
+    private static final Map<String, Method[]> REFLECTION_CACHE = new ConcurrentHashMap<>();
 
     private record Parsed(String left, String op, String right) {}
-
     private static final List<String> OPS = List.of("==", "!=", ">=", "<=", ">", "<");
 
     public static boolean eval(Player p, Event e, Map<String, Object> ctx, String expr) {
@@ -116,6 +110,9 @@ public final class ConditionEvaluator {
     private static String resolve(Player p, Event e, Map<String, Object> ctx, String token) {
         if (ctx != null) {
             Object v = ctx.get(token);
+            if (v == null && token.startsWith("%") && token.endsWith("%")) {
+                v = ctx.get(token.substring(1, token.length() - 1));
+            }
             if (v != null) return String.valueOf(v);
         }
 
@@ -126,18 +123,9 @@ public final class ConditionEvaluator {
 
         if (token.length() > 2 && token.charAt(0) == '%' && token.charAt(token.length() - 1) == '%') {
             String key = token.substring(1, token.length() - 1);
-
-            if (ctx != null) {
-                Object v = ctx.get(key);
-                if (v != null) return String.valueOf(v);
-            }
-
             String bi = builtin(p, e, key);
             if (bi != null) return bi;
-
-            if (PAPI && p != null) {
-                return PlaceholderAPI.setPlaceholders(p, token);
-            }
+            if (PAPI && p != null) return PlaceholderAPI.setPlaceholders(p, token);
             return "";
         }
 
@@ -151,50 +139,70 @@ public final class ConditionEvaluator {
         if (root == null || chain == null || chain.isEmpty()) return null;
 
         String cacheKey = root.getClass().getName() + "#" + chain;
-        MethodHandle[] handles = REFLECTION_CACHE.get(cacheKey);
+        Method[] methods = REFLECTION_CACHE.get(cacheKey);
 
         try {
-            if (handles == null) {
-                String[] parts = chain.split("\\.");
-                List<MethodHandle> list = new ArrayList<>();
-                Class<?> current = root.getClass();
+            if (methods == null) {
+                String cleanChain = chain.replace("(", "").replace(")", "").replace(";", "");
+                String[] parts = cleanChain.split("\\.");
+                List<Method> list = new ArrayList<>();
+                Class<?> currentClass = root.getClass();
 
                 for (String part : parts) {
                     String name = part.trim();
                     if (name.isEmpty()) return null;
 
-                    Method m = findMethodSmart(current, name);
+                    Method m = findMethodSmart(currentClass, name);
                     if (m == null) return null;
 
                     m.setAccessible(true);
-                    list.add(LOOKUP.unreflect(m));
-                    current = m.getReturnType();
+                    list.add(m);
+                    currentClass = m.getReturnType();
                 }
-                handles = list.toArray(new MethodHandle[0]);
-                REFLECTION_CACHE.put(cacheKey, handles);
+                methods = list.toArray(new Method[0]);
+                REFLECTION_CACHE.put(cacheKey, methods);
             }
 
-            Object current = root;
-            for (MethodHandle mh : handles) {
-                if (current == null) return null;
-                current = mh.invoke(current);
+            Object currentObject = root;
+            for (Method m : methods) {
+                if (currentObject == null) return null;
+                currentObject = m.invoke(currentObject);
             }
-            return current;
-
+            return currentObject;
         } catch (Throwable t) {
             return null;
         }
     }
 
     private static Method findMethodSmart(Class<?> clazz, String name) {
-        String getter = "get" + Character.toUpperCase(name.charAt(0)) + name.substring(1);
-        try { return clazz.getMethod(getter); } catch (NoSuchMethodException ignored) {}
+        String getter = "get" + name;
+        String isser = "is" + name;
 
-        String isser = "is" + Character.toUpperCase(name.charAt(0)) + name.substring(1);
-        try { return clazz.getMethod(isser); } catch (NoSuchMethodException ignored) {}
+        Class<?> curr = clazz;
+        while (curr != null && curr != Object.class) {
+            for (Method m : curr.getDeclaredMethods()) {
+                if (m.getParameterCount() == 0) {
+                    String mName = m.getName();
+                    if (mName.equalsIgnoreCase(name) ||
+                            mName.equalsIgnoreCase(getter) ||
+                            mName.equalsIgnoreCase(isser)) {
+                        return m;
+                    }
+                }
+            }
+            curr = curr.getSuperclass();
+        }
 
-        try { return clazz.getMethod(name); } catch (NoSuchMethodException ignored) {}
-
+        for (Method m : clazz.getMethods()) {
+            if (m.getParameterCount() == 0) {
+                String mName = m.getName();
+                if (mName.equalsIgnoreCase(name) ||
+                        mName.equalsIgnoreCase(getter) ||
+                        mName.equalsIgnoreCase(isser)) {
+                    return m;
+                }
+            }
+        }
         return null;
     }
 
@@ -211,7 +219,6 @@ public final class ConditionEvaluator {
             case "player_x" -> String.valueOf(p.getLocation().getBlockX());
             case "player_y" -> String.valueOf(p.getLocation().getBlockY());
             case "player_z" -> String.valueOf(p.getLocation().getBlockZ());
-
             case "block_type" -> {
                 if (e instanceof BlockBreakEvent b) yield b.getBlock().getType().name();
                 if (e instanceof BlockPlaceEvent b) yield b.getBlock().getType().name();
@@ -219,13 +226,11 @@ public final class ConditionEvaluator {
             }
             case "entity_type" -> {
                 if (e instanceof EntityDeathEvent d) yield d.getEntity().getType().name();
-                if (e instanceof PlayerFishEvent f && f.getCaught() != null)
-                    yield f.getCaught().getType().name();
+                if (e instanceof PlayerFishEvent f && f.getCaught() != null) yield f.getCaught().getType().name();
                 yield null;
             }
             case "item_type" -> {
-                if (e instanceof CraftItemEvent ci)
-                    yield ci.getRecipe().getResult().getType().name();
+                if (e instanceof CraftItemEvent ci) yield ci.getRecipe().getResult().getType().name();
                 yield null;
             }
             default -> null;

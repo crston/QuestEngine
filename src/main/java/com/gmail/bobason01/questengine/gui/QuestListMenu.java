@@ -2,7 +2,7 @@ package com.gmail.bobason01.questengine.gui;
 
 import com.gmail.bobason01.questengine.QuestEnginePlugin;
 import com.gmail.bobason01.questengine.quest.QuestDef;
-import com.gmail.bobason01.questengine.util.ItemBuilder; // ItemBuilder 활용
+import com.gmail.bobason01.questengine.util.ItemBuilder;
 import org.bukkit.*;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -106,7 +106,6 @@ public final class QuestListMenu implements Listener {
         }
     }
 
-    // q.display.model (String) 사용 및 ItemBuilder 적용
     private ItemStack createQuestIcon(QuestDef d, List<String> lore) {
         Material mat = Material.BOOK;
         if (d.display.icon != null) {
@@ -257,13 +256,11 @@ public final class QuestListMenu implements Listener {
     private ItemStack icon(Player p, String key, String langKey) {
         String path = "gui.icons." + key;
         Material mat = Material.matchMaterial(plugin.getConfig().getString(path + ".material", "BOOK"));
-        // 설정에서 model을 String으로 가져옴 (숫자 또는 nexo:tomato 형태 지원)
         String model = plugin.getConfig().getString(path + ".model", "-1");
         String name = plugin.msg().get(p, langKey);
         return createIcon(mat, name, model);
     }
 
-    // model 매개변수를 String으로 변경하여 ItemBuilder의 setModel 활용
     private ItemStack createIcon(Material m, String name, String model) {
         return new ItemBuilder(m == null ? Material.BOOK : m)
                 .setName(name)

@@ -39,9 +39,8 @@ public final class QuestAdminCommand extends BaseCommand {
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        // 권한 체크 추가 (관리자 명령어이므로 필수)
         if (!sender.hasPermission("questengine.admin")) {
-            sender.sendMessage(ChatColor.RED + "권한이 없습니다.");
+            sender.sendMessage(ChatColor.RED + "No Permission");
             return true;
         }
 
@@ -66,7 +65,6 @@ public final class QuestAdminCommand extends BaseCommand {
     }
 
     private void sendUsage(CommandSender sender) {
-        // CommandSender가 플레이어라면 플레이어 언어로, 아니면 시스템 기본 언어로 출력
         if (sender instanceof Player p) {
             sender.sendMessage(plugin.msg().get(p, "admin.usage"));
         } else {
@@ -78,7 +76,7 @@ public final class QuestAdminCommand extends BaseCommand {
         try {
             plugin.reloadAll();
 
-            String msgText = "&aReload complete!";
+            String msgText = "&aReload complete";
             if (sender instanceof Player p) {
                 sender.sendMessage(plugin.msg().pref(p, msgText));
             } else {
@@ -96,7 +94,7 @@ public final class QuestAdminCommand extends BaseCommand {
             return;
         }
         Player target = Bukkit.getPlayerExact(args[1]);
-        QuestDef def = plugin.quests().get(args[2]); // engine().quests() 대신 quests()로 직접 접근 가능
+        QuestDef def = plugin.quests().get(args[2]);
 
         if (target == null || def == null) {
             sender.sendMessage(getMessage(sender, "admin.invalid_args"));
@@ -197,7 +195,7 @@ public final class QuestAdminCommand extends BaseCommand {
         CompletableFuture.runAsync(() -> {
             Map<UUID, Integer> all = plugin.progress().getAllPoints();
             if (all == null || all.isEmpty()) {
-                sender.sendMessage(ChatColor.GRAY + "데이터가 없습니다.");
+                sender.sendMessage(ChatColor.GRAY + "No Data");
                 return;
             }
 
@@ -221,12 +219,9 @@ public final class QuestAdminCommand extends BaseCommand {
             }
             String result = sb.toString();
             Bukkit.getScheduler().runTask(plugin, () -> sender.sendMessage(result));
-        }, plugin.asyncPool());
+        }, plugin.engine().asyncPool());
     }
 
-    /**
-     * 상황에 맞는 메시지를 가져오는 헬퍼 메서드
-     */
     private String getMessage(CommandSender sender, String path) {
         if (sender instanceof Player p) {
             return plugin.msg().get(p, path);
@@ -241,7 +236,7 @@ public final class QuestAdminCommand extends BaseCommand {
         }
         String sub = args[0].toLowerCase(Locale.ROOT);
         if (args.length == 2 && SUBS_NEED_PLAYER.contains(sub)) {
-            return null; // 플레이어 목록 자동 완성
+            return null;
         }
         if (args.length == 3 && SUBS_NEED_QUEST.contains(sub)) {
             return StringUtil.copyPartialMatches(args[2], plugin.quests().ids(), new ArrayList<>());

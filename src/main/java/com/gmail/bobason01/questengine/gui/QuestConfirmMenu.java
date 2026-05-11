@@ -62,7 +62,7 @@ public final class QuestConfirmMenu implements Listener {
         Object bp = plugin.gui().getSession(p, "confirm_back_page");
         if (bp instanceof Integer i) backPage = i;
 
-        if (slot == 11) { // YES: 퀘스트 포기
+        if (slot == 11) {
             plugin.engine().cancelQuest(p, q);
 
             int finalBackPage = backPage;
@@ -70,7 +70,7 @@ public final class QuestConfirmMenu implements Listener {
             return;
         }
 
-        if (slot == 15) { // NO: 돌아가기
+        if (slot == 15) {
             int finalBackPage = backPage;
             Bukkit.getScheduler().runTask(plugin, () -> plugin.gui().list().open(p, finalBackPage));
         }

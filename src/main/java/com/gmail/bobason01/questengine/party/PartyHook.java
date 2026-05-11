@@ -122,7 +122,6 @@ public final class PartyHook {
 
             } catch (Throwable t) {
                 broken = true;
-                // Silent catch here to avoid console spam after initial warning
             }
         }
 

@@ -139,7 +139,7 @@ public final class QuestEditorCommand extends BaseCommand {
         }
     }
 
-    private Method findNoArgMethod(Class<?> type, String name) {
+    private Method searchMethod(Class<?> type, String name) {
         for (Method m : type.getMethods()) {
             if (m.getName().equals(name) && m.getParameterCount() == 0) return m;
         }
@@ -151,6 +151,18 @@ public final class QuestEditorCommand extends BaseCommand {
             curr = curr.getSuperclass();
         }
         return null;
+    }
+
+    private Method findNoArgMethod(Class<?> type, String name) {
+        Method m = searchMethod(type, name);
+        if (m != null) return m;
+
+        String cap = Character.toUpperCase(name.charAt(0)) + name.substring(1);
+        m = searchMethod(type, "get" + cap);
+        if (m != null) return m;
+
+        m = searchMethod(type, "is" + cap);
+        return m;
     }
 
     private void handleDelete(Player player, String[] args) {

@@ -43,7 +43,7 @@ public final class LanguageMenu implements Listener {
         ItemStack item = new ItemStack(Material.PAPER);
         ItemMeta meta = item.getItemMeta();
         if (meta != null) {
-            String name = code.equalsIgnoreCase("ko") ? "&e한국어 (Korean)" : "&eEnglish (영어)";
+            String name = code.equalsIgnoreCase("ko") ? "&e한국어 (Korean)" : "&eEnglish";
             meta.setDisplayName(ChatColor.translateAlternateColorCodes('&', name));
             meta.setLore(List.of(ChatColor.GRAY + "Code: " + code.toUpperCase()));
             item.setItemMeta(meta);
@@ -62,23 +62,20 @@ public final class LanguageMenu implements Listener {
         ItemStack clicked = e.getCurrentItem();
         if (clicked == null || !clicked.hasItemMeta()) return;
 
-        // 로어에서 국가 코드 추출
         List<String> lore = clicked.getItemMeta().getLore();
         if (lore == null || lore.isEmpty()) return;
 
         String code = lore.get(0).replace(ChatColor.GRAY + "Code: ", "").toLowerCase();
 
-        // 언어 변경 및 저장 대기열에 등록 (핵심 수정 부분)
         PlayerData data = plugin.progress().of(p.getUniqueId(), p.getName());
         data.setLanguage(code);
-        plugin.progress().save(data); // ProgressRepository 에 저장을 지시하여 디스크/DB에 기록되게 함
+        plugin.progress().save(data);
 
         p.sendMessage(plugin.msg().get(p, "language_changed").replace("%lang%", code.toUpperCase()));
 
         p.closeInventory();
         plugin.gui().sound(p, "success");
 
-        // 퀘스트 목록 다시 열기
         Bukkit.getScheduler().runTaskLater(plugin, () -> plugin.gui().list().open(p, 0), 1L);
     }
 }

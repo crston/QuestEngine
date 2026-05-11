@@ -898,6 +898,7 @@ public final class Engine {
         if (root == null || chain == null || chain.isEmpty()) return null;
         Object current = root;
         try {
+            // 체이닝 지원을 위해 점(.)을 기준으로 분리하여 반복
             for (String part : chain.split("\\.")) {
                 if (current == null) return null;
                 String name = part.trim().replace("()", "");
@@ -906,6 +907,7 @@ public final class Engine {
                     plugin.getLogger().warning("[QuestEngine] [EvalChain] Method not found: " + name + "() in class " + current.getClass().getSimpleName());
                     return null;
                 }
+                // 접근 권한 문제를 해결하기 위해 필수적으로 적용
                 m.setAccessible(true);
                 current = m.invoke(current);
             }
@@ -917,15 +919,21 @@ public final class Engine {
     }
 
     private Method findNoArgMethod(Class<?> type, String name) {
-        for (Method m : type.getMethods()) {
-            if (m.getName().equals(name) && m.getParameterCount() == 0) return m;
-        }
+        // 1. 현재 클래스 및 상위 클래스들에 선언된 모든 메서드 (private, protected 포함) 우선 탐색
         Class<?> curr = type;
         while (curr != null && curr != Object.class) {
             for (Method m : curr.getDeclaredMethods()) {
-                if (m.getName().equals(name) && m.getParameterCount() == 0) return m;
+                if (m.getName().equals(name) && m.getParameterCount() == 0) {
+                    return m;
+                }
             }
             curr = curr.getSuperclass();
+        }
+        // 2. 인터페이스 등을 통해 상속받은 public 메서드 재탐색
+        for (Method m : type.getMethods()) {
+            if (m.getName().equals(name) && m.getParameterCount() == 0) {
+                return m;
+            }
         }
         return null;
     }

@@ -50,16 +50,17 @@ public final class QuestEditorMenu implements Listener {
         Session(QuestEditorDraft draft, EditorTab tab) { this.draft = draft; this.tab = tab; }
     }
 
+    // 엔진과 에디터에서 공통으로 사용할 BUILTIN_EVENTS 업데이트
     private static final List<String> BUILTIN_EVENTS = List.of(
             "BLOCK_BREAK", "BLOCK_BURN", "BLOCK_EXPLODE", "BLOCK_FERTILIZING", "BLOCK_PLACE",
-            "BREEDING", "BREWING", "DEAL_DAMAGE", "ENTITY_INTERACT", "FISHING",
+            "BREEDING", "BREWING", "DEAL_DAMAGE", "PLAYER_ATTACK", "ENTITY_INTERACT", "FISHING",
             "INVENTORY_OPEN", "ITEM_BREAK", "ITEM_CONSUME", "ITEM_CRAFT", "ITEM_DAMAGE",
             "ITEM_DROP", "ITEM_ENCHANT", "ITEM_MENDING", "ITEM_MOVE", "ITEM_PICKUP",
             "ITEM_REPAIR", "MOBKILLING", "MYTHICMOBS_ENTITY_KILL", "MYTHICMOBS_ENTITY_SPAWN",
             "PLAYER_ARMOR", "PLAYER_BED_ENTER", "PLAYER_CHAT", "PLAYER_COMMAND",
             "PLAYER_EXP_GAIN", "PLAYER_LEAVE", "PLAYER_LEVELUP", "PLAYER_PRE_JOIN",
             "PLAYER_RESPAWN", "PLAYER_SWAP_HAND", "PLAYER_TELEPORT", "PLAYER_WALK",
-            "SMITHING", "TAMING", "WORLD_CHUNK_LOAD", "CRAFTSLOT_CLICK"
+            "DISTANCE_FROM", "SMITHING", "TAMING", "WORLD_CHUNK_LOAD", "CRAFTSLOT_CLICK"
     );
 
     public QuestEditorMenu(QuestEnginePlugin plugin) {
@@ -234,7 +235,6 @@ public final class QuestEditorMenu implements Listener {
                 inv.setItem(12, listItem(p, "gui.editor.display.description.label", d.displayDescription));
                 inv.setItem(14, iconItem(p, d));
                 inv.setItem(16, textItem(p, "gui.editor.display.progress.label", d.displayProgress));
-                // customModelData -> model 명칭 반영 및 문자열 표시
                 inv.setItem(19, textItem(p, "gui.editor.display.model.label", d.displayModel));
                 inv.setItem(21, textItem(p, "gui.editor.display.hint.label", d.displayHint));
                 inv.setItem(23, textItem(p, "gui.editor.display.reward.label", d.displayReward));
@@ -307,7 +307,7 @@ public final class QuestEditorMenu implements Listener {
         return new ItemBuilder(m)
                 .setName(m(p, "gui.editor.display.icon.name"))
                 .setLore(mL(p, "gui.editor.display.icon.lore"))
-                .setModel(d.displayModel) // 변경된 String model 필드 사용
+                .setModel(d.displayModel)
                 .hideAllFlags().build();
     }
 
@@ -360,7 +360,6 @@ public final class QuestEditorMenu implements Listener {
         }
         if (s.tab == EditorTab.DISPLAY && slot >= SIZE && e.getCurrentItem() != null) {
             s.draft.displayIcon = e.getCurrentItem().getType().name();
-            // 아이템 클릭 시 모델 정보 추출 로직 (String 호환)
             if (e.getCurrentItem().hasItemMeta()) {
                 var meta = e.getCurrentItem().getItemMeta();
                 if (meta.hasCustomModelData()) {
@@ -576,13 +575,17 @@ public final class QuestEditorMenu implements Listener {
 
     private boolean applyCaptureLine(QuestEditorDraft d, String line, boolean replace) {
         if (line == null || line.isEmpty()) return false;
-        int semi = line.indexOf(';');
-        if (semi <= 0 || semi == line.length() - 1) return false;
-        String k = line.substring(0, semi).trim();
-        String v = line.substring(semi + 1).trim();
+        // 세미콜론 파싱 로직 개선: 마지막 세미콜론이 있어도 무시하도록 처리
+        String[] parts = line.split(";");
+        if (parts.length < 2) return false;
+
+        String k = parts[0].trim();
+        String v = parts[1].trim();
+
         if (k.length() > 2 && k.startsWith("%") && k.endsWith("%")) k = k.substring(1, k.length()-1);
         if (k.isEmpty()) return false;
         if (!replace && d.customCaptures.containsKey(k)) return false;
+
         d.customCaptures.put(k, v);
         return true;
     }

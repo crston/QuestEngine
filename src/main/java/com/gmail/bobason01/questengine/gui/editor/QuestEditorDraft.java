@@ -34,7 +34,6 @@ public final class QuestEditorDraft {
     public String displayDifficulty = "";
     public String displayIcon = "BOOK";
     public String displayHint = "";
-    // int에서 String으로 변경하여 nexo:tomato 등 지원
     public String displayModel = "-1";
 
     public String leftClickTip = "";
@@ -55,7 +54,7 @@ public final class QuestEditorDraft {
         dMap.put("difficulty", displayDifficulty);
         dMap.put("icon", displayIcon);
         dMap.put("hint", displayHint);
-        dMap.put("model", displayModel); // 키값 변경
+        dMap.put("model", displayModel);
         dMap.put("left_click_tip", leftClickTip);
         dMap.put("left_click_command", leftClickCommand);
 

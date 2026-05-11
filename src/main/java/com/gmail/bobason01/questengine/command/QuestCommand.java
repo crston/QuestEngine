@@ -30,7 +30,6 @@ public final class QuestCommand extends BaseCommand {
     @Override
     public boolean onCommand(CommandSender s, Command c, String l, String[] a) {
         if (!(s instanceof Player p)) {
-            // 콘솔은 기본 언어(en)로 출력
             s.sendMessage(plugin.msg().getRaw("en", "player_only"));
             return true;
         }
@@ -74,21 +73,19 @@ public final class QuestCommand extends BaseCommand {
 
     private void handleLang(Player p, String[] a) {
         if (a.length < 2) {
-            // 인자가 없으면 언어 선택 GUI 오픈 (구현된 메뉴 활용)
             plugin.gui().openLanguageMenu(p);
             return;
         }
 
         String targetLang = a[1].toLowerCase(Locale.ROOT);
         if (plugin.msg().getAvailableLanguages().contains(targetLang)) {
-            // PlayerData에 언어 설정 저장 및 디스크/DB 반영
             var data = plugin.progress().of(p.getUniqueId(), p.getName());
             data.setLanguage(targetLang);
-            plugin.progress().save(data); // 핵심 수정 부분: 변경된 데이터 저장 큐 등록
+            plugin.progress().save(data);
 
             p.sendMessage(plugin.msg().get(p, "language_changed").replace("%lang%", targetLang.toUpperCase()));
         } else {
-            p.sendMessage("§cInvalid language. Available: " + plugin.msg().getAvailableLanguages());
+            p.sendMessage("§cInvalid language");
         }
     }
 

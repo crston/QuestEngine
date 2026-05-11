@@ -24,7 +24,6 @@ public final class EventDispatcher implements Listener {
     public EventDispatcher(Plugin plugin, Engine engine) {
         this.engine = engine;
 
-        // 리플렉션을 통한 CraftSlotAPI 주입 시도
         try {
             Class<?> providerClass = Class.forName("com.gmail.bobason01.api.CraftSlotAPIProvider");
             Method getMethod = providerClass.getMethod("get");
@@ -35,7 +34,6 @@ public final class EventDispatcher implements Listener {
                 plugin.getLogger().info("[QuestEngine] CraftSlotAPI successfully injected via reflection.");
             }
         } catch (Exception ignored) {
-            // API가 없으면 조용히 넘어감
         }
 
         Bukkit.getPluginManager().registerEvents(this, plugin);
@@ -51,15 +49,12 @@ public final class EventDispatcher implements Listener {
         if (!(e.getWhoClicked() instanceof Player p)) return;
 
         try {
-            // 리플렉션으로 api.isMenuClick(e) 호출
             boolean isMenuClick = (boolean) isMenuClickMethod.invoke(apiInstance, e);
             if (isMenuClick) {
                 handle(p, "CRAFTSLOT_CLICK", e);
             }
         } catch (Exception ignored) {}
     }
-
-    // --- BLOCK EVENTS ---
 
     @EventHandler(ignoreCancelled = true)
     public void onBlockBreak(BlockBreakEvent e) { handle(e.getPlayer(), "BLOCK_BREAK", e); }
@@ -72,8 +67,6 @@ public final class EventDispatcher implements Listener {
 
     @EventHandler(ignoreCancelled = true)
     public void onCompost(InventoryMoveItemEvent e) { handle(null, "COMPOSTING", e); }
-
-    // --- PLAYER MOVEMENTS & STATUS ---
 
     @EventHandler(ignoreCancelled = true)
     public void onMove(PlayerMoveEvent e) {
@@ -114,8 +107,6 @@ public final class EventDispatcher implements Listener {
     @EventHandler(ignoreCancelled = true)
     public void onSwap(PlayerSwapHandItemsEvent e) { handle(e.getPlayer(), "PLAYER_SWAP_HAND", e); }
 
-    // --- COMBAT & ENTITY ---
-
     @EventHandler(ignoreCancelled = true)
     public void onAttack(EntityDamageByEntityEvent e) {
         if (e.getDamager() instanceof Player p) {
@@ -154,8 +145,6 @@ public final class EventDispatcher implements Listener {
 
     @EventHandler(ignoreCancelled = true)
     public void onSpawn(EntitySpawnEvent e) { handle(null, "ENTITY_SPAWN", e); }
-
-    // --- ITEM & INVENTORY ---
 
     @EventHandler(ignoreCancelled = true)
     public void onItemConsume(PlayerItemConsumeEvent e) { handle(e.getPlayer(), "ITEM_CONSUME", e); }
@@ -201,8 +190,6 @@ public final class EventDispatcher implements Listener {
     public void onSmith(SmithItemEvent e) {
         if (e.getWhoClicked() instanceof Player p) handle(p, "SMITHING", e);
     }
-
-    // --- FARMING & INTERACT ---
 
     @EventHandler(ignoreCancelled = true)
     public void onFish(PlayerFishEvent e) { handle(e.getPlayer(), "FISHING", e); }
