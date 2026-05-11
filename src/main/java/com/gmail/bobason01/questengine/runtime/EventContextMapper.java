@@ -133,6 +133,20 @@ public final class EventContextMapper {
             ctx.put("block_type", bp.getBlockPlaced().getType().name());
         }
 
+        if (e.getClass().getName().equals("com.gmail.bobason01.event.GUIOpenEvent")) {
+            try {
+                Method m = e.getClass().getMethod("getGuiId");
+                ctx.put("gui_id", m.invoke(e));
+            } catch (Throwable ignored) {}
+        }
+
+        if (e.getClass().getName().equals("com.gmail.bobason01.api.event.HotkeyInputEvent")) {
+            try {
+                Method m = e.getClass().getMethod("getKeyName");
+                ctx.put("hotkey_name", m.invoke(e));
+            } catch (Throwable ignored) {}
+        }
+
         if (e instanceof EntityEvent ee) {
             Entity ent = ee.getEntity();
             ctx.put("entity_type", ent.getType().name());

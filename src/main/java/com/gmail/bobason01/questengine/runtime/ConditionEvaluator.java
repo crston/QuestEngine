@@ -26,7 +26,7 @@ public final class ConditionEvaluator {
     private static final List<String> OPS = List.of("==", "!=", ">=", "<=", ">", "<");
 
     public static boolean eval(Player p, Event e, Map<String, Object> ctx, String expr) {
-        if (expr == null || expr.isEmpty()) return false;
+        if (expr == null || expr.isEmpty() || expr.equalsIgnoreCase("NONE")) return true;
 
         Parsed parsed = EXPR_CACHE.computeIfAbsent(expr, ConditionEvaluator::parse);
         if (parsed == null) return false;
@@ -219,6 +219,24 @@ public final class ConditionEvaluator {
             case "player_x" -> String.valueOf(p.getLocation().getBlockX());
             case "player_y" -> String.valueOf(p.getLocation().getBlockY());
             case "player_z" -> String.valueOf(p.getLocation().getBlockZ());
+            case "gui_id" -> {
+                if (e != null && e.getClass().getName().equals("com.gmail.bobason01.event.GUIOpenEvent")) {
+                    try {
+                        Method m = e.getClass().getMethod("getGuiId");
+                        yield (String) m.invoke(e);
+                    } catch (Throwable ignored) {}
+                }
+                yield null;
+            }
+            case "hotkey_name" -> {
+                if (e != null && e.getClass().getName().equals("com.gmail.bobason01.api.event.HotkeyInputEvent")) {
+                    try {
+                        Method m = e.getClass().getMethod("getKeyName");
+                        yield (String) m.invoke(e);
+                    } catch (Throwable ignored) {}
+                }
+                yield null;
+            }
             case "block_type" -> {
                 if (e instanceof BlockBreakEvent b) yield b.getBlock().getType().name();
                 if (e instanceof BlockPlaceEvent b) yield b.getBlock().getType().name();

@@ -110,14 +110,12 @@ public final class DynamicEventListener {
         Class<? extends Event> found = null;
 
         switch (key) {
-            // --- BLOCK EVENTS ---
             case "BLOCK_BREAK": found = org.bukkit.event.block.BlockBreakEvent.class; break;
             case "BLOCK_PLACE": found = org.bukkit.event.block.BlockPlaceEvent.class; break;
             case "BLOCK_BURN": found = org.bukkit.event.block.BlockBurnEvent.class; break;
             case "BLOCK_EXPLODE": found = org.bukkit.event.block.BlockExplodeEvent.class; break;
-            case "BLOCK_FERTILIZING": found = org.bukkit.event.block.BlockFertilizeEvent.class; break;
+            case "BLOCK_FERTILizing": found = org.bukkit.event.block.BlockFertilizeEvent.class; break;
 
-            // --- ENTITY & MOB EVENTS ---
             case "ENTITY_DEATH":
             case "PLAYER_KILL":
             case "MOBKILLING": found = org.bukkit.event.entity.EntityDeathEvent.class; break;
@@ -130,7 +128,6 @@ public final class DynamicEventListener {
             case "DEAL_DAMAGE":
             case "PLAYER_ATTACK": found = org.bukkit.event.entity.EntityDamageByEntityEvent.class; break;
 
-            // --- PLAYER STATUS & MOVEMENT ---
             case "PLAYER_CHAT": found = org.bukkit.event.player.AsyncPlayerChatEvent.class; break;
             case "PLAYER_COMMAND": found = org.bukkit.event.player.PlayerCommandPreprocessEvent.class; break;
             case "PLAYER_TELEPORT": found = org.bukkit.event.player.PlayerTeleportEvent.class; break;
@@ -155,7 +152,6 @@ public final class DynamicEventListener {
             case "FARMING": found = org.bukkit.event.player.PlayerInteractEvent.class; break;
             case "ENTITY_INTERACT": found = org.bukkit.event.player.PlayerInteractEntityEvent.class; break;
 
-            // --- ITEM & INVENTORY EVENTS ---
             case "ITEM_CRAFT": found = org.bukkit.event.inventory.CraftItemEvent.class; break;
             case "CRAFTSLOT_CLICK":
             case "ITEM_MOVE":
@@ -170,12 +166,17 @@ public final class DynamicEventListener {
             case "ITEM_MENDING": found = org.bukkit.event.player.PlayerItemMendEvent.class; break;
             case "SMITHING": found = org.bukkit.event.inventory.SmithItemEvent.class; break;
             case "BREWING": found = org.bukkit.event.inventory.BrewEvent.class; break;
-            case "INVENTORY_OPEN": found = org.bukkit.event.inventory.InventoryOpenEvent.class; break;
             case "ITEM_REPAIR": found = org.bukkit.event.inventory.PrepareAnvilEvent.class; break;
             case "TRADING": found = org.bukkit.event.inventory.TradeSelectEvent.class; break;
             case "COMPOSTING": found = org.bukkit.event.inventory.InventoryMoveItemEvent.class; break;
 
-            // --- WORLD & EXTERNAL ---
+            case "GUIMANAGER_OPEN":
+                try { found = (Class<? extends Event>) Class.forName("com.gmail.bobason01.event.GUIOpenEvent"); } catch (Exception ignored) {}
+                break;
+            case "HOTKEY_INPUT":
+                try { found = (Class<? extends Event>) Class.forName("com.gmail.bobason01.api.event.HotkeyInputEvent"); } catch (Exception ignored) {}
+                break;
+
             case "WORLD_CHUNK_LOAD": found = org.bukkit.event.world.ChunkLoadEvent.class; break;
             case "MYTHICMOBS_ENTITY_KILL":
                 try { found = (Class<? extends Event>) Class.forName("io.lumine.mythic.bukkit.events.MythicMobDeathEvent"); } catch (Exception ignored) {}
@@ -190,7 +191,6 @@ public final class DynamicEventListener {
             return found;
         }
 
-        // 수동 매핑 실패 시 클래스 이름으로 직접 찾기
         try {
             Class<?> clz = Class.forName(name);
             if (Event.class.isAssignableFrom(clz)) {

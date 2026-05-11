@@ -756,6 +756,26 @@ public final class Engine {
             if (item == null || item.getType() == org.bukkit.Material.AIR) return false;
             return checkTokens(item.getType().name(), target);
         });
+
+        matchers.put("guimanager_open", (player, event, target) -> {
+            if (!event.getClass().getName().equals("com.gmail.bobason01.event.GUIOpenEvent")) return false;
+            try {
+                Method m = event.getClass().getMethod("getGuiId");
+                String guiId = (String) m.invoke(event);
+                return checkTokens(guiId, target);
+            } catch (Throwable ignored) {}
+            return false;
+        });
+
+        matchers.put("hotkey_input", (player, event, target) -> {
+            if (!event.getClass().getName().equals("com.gmail.bobason01.api.event.HotkeyInputEvent")) return false;
+            try {
+                Method m = event.getClass().getMethod("getKeyName");
+                String hotkeyName = (String) m.invoke(event);
+                return checkTokens(hotkeyName, target);
+            } catch (Throwable ignored) {}
+            return false;
+        });
     }
 
     private void preloadInternalQuests() {
@@ -813,6 +833,8 @@ public final class Engine {
         if (k.equalsIgnoreCase("MythicMobDeath")) return "MYTHICMOBS_ENTITY_KILL";
         if (k.equalsIgnoreCase("PlayerInteractEntity")) return "ENTITY_INTERACT";
         if (k.equalsIgnoreCase("EntityDeath")) return "MOBKILLING";
+        if (k.equalsIgnoreCase("GUIOpen")) return "GUIMANAGER_OPEN";
+        if (k.equalsIgnoreCase("HotkeyInput")) return "HOTKEY_INPUT";
         return k.replace("MythicMob", "MYTHICMOBS_").replace("Player", "PLAYER_").replace("Entity", "ENTITY_").replace("Block", "BLOCK_").toUpperCase(Locale.ROOT);
     }
 
@@ -898,7 +920,6 @@ public final class Engine {
         if (root == null || chain == null || chain.isEmpty()) return null;
         Object current = root;
         try {
-            // 체이닝 지원을 위해 점(.)을 기준으로 분리하여 반복
             for (String part : chain.split("\\.")) {
                 if (current == null) return null;
                 String name = part.trim().replace("()", "");
@@ -907,7 +928,6 @@ public final class Engine {
                     plugin.getLogger().warning("[QuestEngine] [EvalChain] Method not found: " + name + "() in class " + current.getClass().getSimpleName());
                     return null;
                 }
-                // 접근 권한 문제를 해결하기 위해 필수적으로 적용
                 m.setAccessible(true);
                 current = m.invoke(current);
             }
@@ -919,7 +939,6 @@ public final class Engine {
     }
 
     private Method findNoArgMethod(Class<?> type, String name) {
-        // 1. 현재 클래스 및 상위 클래스들에 선언된 모든 메서드 (private, protected 포함) 우선 탐색
         Class<?> curr = type;
         while (curr != null && curr != Object.class) {
             for (Method m : curr.getDeclaredMethods()) {
@@ -929,7 +948,6 @@ public final class Engine {
             }
             curr = curr.getSuperclass();
         }
-        // 2. 인터페이스 등을 통해 상속받은 public 메서드 재탐색
         for (Method m : type.getMethods()) {
             if (m.getName().equals(name) && m.getParameterCount() == 0) {
                 return m;

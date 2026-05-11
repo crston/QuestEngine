@@ -50,11 +50,10 @@ public final class QuestEditorMenu implements Listener {
         Session(QuestEditorDraft draft, EditorTab tab) { this.draft = draft; this.tab = tab; }
     }
 
-    // 엔진과 에디터에서 공통으로 사용할 BUILTIN_EVENTS 업데이트
     private static final List<String> BUILTIN_EVENTS = List.of(
-            "BLOCK_BREAK", "BLOCK_BURN", "BLOCK_EXPLODE", "BLOCK_FERTILIZING", "BLOCK_PLACE",
+            "NONE", "BLOCK_BREAK", "BLOCK_BURN", "BLOCK_EXPLODE", "BLOCK_FERTILIZING", "BLOCK_PLACE",
             "BREEDING", "BREWING", "DEAL_DAMAGE", "PLAYER_ATTACK", "ENTITY_INTERACT", "FISHING",
-            "INVENTORY_OPEN", "ITEM_BREAK", "ITEM_CONSUME", "ITEM_CRAFT", "ITEM_DAMAGE",
+            "GUIMANAGER_OPEN", "HOTKEY_INPUT", "ITEM_BREAK", "ITEM_CONSUME", "ITEM_CRAFT", "ITEM_DAMAGE",
             "ITEM_DROP", "ITEM_ENCHANT", "ITEM_MENDING", "ITEM_MOVE", "ITEM_PICKUP",
             "ITEM_REPAIR", "MOBKILLING", "MYTHICMOBS_ENTITY_KILL", "MYTHICMOBS_ENTITY_SPAWN",
             "PLAYER_ARMOR", "PLAYER_BED_ENTER", "PLAYER_CHAT", "PLAYER_COMMAND",
@@ -575,7 +574,6 @@ public final class QuestEditorMenu implements Listener {
 
     private boolean applyCaptureLine(QuestEditorDraft d, String line, boolean replace) {
         if (line == null || line.isEmpty()) return false;
-        // 세미콜론 파싱 로직 개선: 마지막 세미콜론이 있어도 무시하도록 처리
         String[] parts = line.split(";");
         if (parts.length < 2) return false;
 
@@ -615,6 +613,12 @@ public final class QuestEditorMenu implements Listener {
             inv.setItem(10, templateItem(p, m(p, "gui.editor.template.cond.level"), "%player_level% >= 10"));
             inv.setItem(11, templateItem(p, m(p, "gui.editor.template.cond.world"), "%player_world% == 'world_nether'"));
             inv.setItem(12, templateItem(p, m(p, "gui.editor.template.cond.papi"), "%vault_eco_balance% >= 1000"));
+
+            String invLang = plugin.msg().get(p, "gui.editor.template.cond.gui");
+            inv.setItem(13, templateItem(p, invLang != null && !invLang.isEmpty() ? invLang : "GUI Condition", "%gui_id% == 'shop'"));
+
+            String noneLang = plugin.msg().get(p, "gui.editor.template.cond.none");
+            inv.setItem(14, templateItem(p, noneLang != null && !noneLang.isEmpty() ? noneLang : "Always Pass", "NONE"));
         } else if (key.equals("targets")) {
             inv.setItem(10, templateItem(p, m(p, "gui.editor.template.target.all"), "*"));
             inv.setItem(11, templateItem(p, m(p, "gui.editor.template.target.block"), "STONE"));
@@ -626,6 +630,7 @@ public final class QuestEditorMenu implements Listener {
             inv.setItem(19, templateItem(p, m(p, "gui.editor.template.target.command"), "spawn"));
             inv.setItem(20, templateItem(p, m(p, "gui.editor.template.target.chat"), "hello"));
             inv.setItem(21, templateItem(p, m(p, "gui.editor.template.target.multiple"), "ZOMBIE|SKELETON"));
+            inv.setItem(22, templateItem(p, "Hotkey Input", "SHIFT_F"));
         } else {
             inv.setItem(10, templateItem(p, m(p, "gui.editor.template.default"), "example_item"));
         }

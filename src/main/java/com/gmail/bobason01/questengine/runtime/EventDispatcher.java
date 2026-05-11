@@ -21,6 +21,7 @@ public final class EventDispatcher implements Listener {
     private Method isMenuClickMethod;
     private Object apiInstance;
 
+    @SuppressWarnings("unchecked")
     public EventDispatcher(Plugin plugin, Engine engine) {
         this.engine = engine;
 
@@ -37,6 +38,36 @@ public final class EventDispatcher implements Listener {
         }
 
         Bukkit.getPluginManager().registerEvents(this, plugin);
+
+        try {
+            Class<? extends Event> guiEventClass = (Class<? extends Event>) Class.forName("com.gmail.bobason01.event.GUIOpenEvent");
+            Bukkit.getPluginManager().registerEvent(guiEventClass, this, EventPriority.NORMAL, (listener, event) -> {
+                if (guiEventClass.isInstance(event)) {
+                    Player p = null;
+                    try {
+                        p = (Player) event.getClass().getMethod("getPlayer").invoke(event);
+                    } catch (Throwable ignored) {}
+                    if (p != null) handle(p, "GUIMANAGER_OPEN", event);
+                }
+            }, plugin, true);
+            plugin.getLogger().info("[QuestEngine] Dynamically hooked into GUIManager's GUIOpenEvent.");
+        } catch (Throwable ignored) {
+        }
+
+        try {
+            Class<? extends Event> hotkeyEventClass = (Class<? extends Event>) Class.forName("com.gmail.bobason01.api.event.HotkeyInputEvent");
+            Bukkit.getPluginManager().registerEvent(hotkeyEventClass, this, EventPriority.NORMAL, (listener, event) -> {
+                if (hotkeyEventClass.isInstance(event)) {
+                    Player p = null;
+                    try {
+                        p = (Player) event.getClass().getMethod("getPlayer").invoke(event);
+                    } catch (Throwable ignored) {}
+                    if (p != null) handle(p, "HOTKEY_INPUT", event);
+                }
+            }, plugin, true);
+            plugin.getLogger().info("[QuestEngine] Dynamically hooked into HotkeyManager's HotkeyInputEvent.");
+        } catch (Throwable ignored) {
+        }
     }
 
     private void handle(Player player, String key, Event event) {

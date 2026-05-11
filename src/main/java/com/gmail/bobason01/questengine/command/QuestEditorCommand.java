@@ -109,13 +109,15 @@ public final class QuestEditorCommand extends BaseCommand {
 
         sender.sendMessage("§e=== Variables Debug for " + def.name + " §e===");
         sender.sendMessage("§7Target Player : §f" + target.getName());
+        sender.sendMessage("§7[Notice] Event-based methods (e.g. upgradeCount) will show null during manual debug.");
 
         for (Map.Entry<String, String> entry : def.custom.captures.entrySet()) {
             String key = entry.getKey();
             String path = entry.getValue();
 
+            // debug 명령은 플레이어 객체(root)를 기반으로 메서드를 검색함
             Object result = evalChain(target, path);
-            String resultStr = (result != null) ? "§a" + result.toString() : "§cnull §7(Event path or invalid)";
+            String resultStr = (result != null) ? "§a" + result.toString() : "§cnull §7(Not found in Player class)";
 
             sender.sendMessage("§f- §b%" + key + "% §7(Path: " + path + ") -> " + resultStr);
         }
@@ -125,9 +127,11 @@ public final class QuestEditorCommand extends BaseCommand {
         if (root == null || chain == null || chain.isEmpty()) return null;
         Object current = root;
         try {
-            for (String part : chain.split("\\.")) {
+            // 괄호 및 기호 정제 로직 포함
+            String cleanChain = chain.replace("()", "").replace(";", "").trim();
+            for (String part : cleanChain.split("\\.")) {
                 if (current == null) return null;
-                String name = part.trim().replace("()", "");
+                String name = part.trim();
                 Method m = findNoArgMethod(current.getClass(), name);
                 if (m == null) return null;
                 m.setAccessible(true);
@@ -140,13 +144,14 @@ public final class QuestEditorCommand extends BaseCommand {
     }
 
     private Method searchMethod(Class<?> type, String name) {
+        // 대소문자 무시 검색 (equalsIgnoreCase)
         for (Method m : type.getMethods()) {
-            if (m.getName().equals(name) && m.getParameterCount() == 0) return m;
+            if (m.getName().equalsIgnoreCase(name) && m.getParameterCount() == 0) return m;
         }
         Class<?> curr = type;
         while (curr != null && curr != Object.class) {
             for (Method m : curr.getDeclaredMethods()) {
-                if (m.getName().equals(name) && m.getParameterCount() == 0) return m;
+                if (m.getName().equalsIgnoreCase(name) && m.getParameterCount() == 0) return m;
             }
             curr = curr.getSuperclass();
         }
@@ -157,11 +162,10 @@ public final class QuestEditorCommand extends BaseCommand {
         Method m = searchMethod(type, name);
         if (m != null) return m;
 
-        String cap = Character.toUpperCase(name.charAt(0)) + name.substring(1);
-        m = searchMethod(type, "get" + cap);
+        m = searchMethod(type, "get" + name);
         if (m != null) return m;
 
-        m = searchMethod(type, "is" + cap);
+        m = searchMethod(type, "is" + name);
         return m;
     }
 
