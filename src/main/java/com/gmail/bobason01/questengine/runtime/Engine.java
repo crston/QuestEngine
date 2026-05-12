@@ -305,9 +305,6 @@ public final class Engine {
                 if (def == null) continue;
                 if (!isSelf && !def.party) continue;
 
-                Map<String, Object> finalCtx = new HashMap<>(ctx);
-                finalCtx.put("player_name", name);
-
                 boolean active = progress.isActive(uid, name, def.id);
 
                 if (!active) {
@@ -316,11 +313,11 @@ public final class Engine {
                     if (!progress.canStart(uid, name, def)) continue;
                     if (!checkRequirements(uid, name, def)) continue;
                     if (!checkTargetMatch(actor, event, matcher, def)) continue;
-                    if (!checkConditions(actor, event, finalCtx, def.condStart)) continue;
+                    if (!checkConditions(actor, event, ctx, def.condStart)) continue;
 
                     progress.start(uid, name, def);
-                    actions.runAll(def, "accept", beneficiary, finalCtx);
-                    actions.runAll(def, "start", beneficiary, finalCtx);
+                    actions.runAll(def, "accept", beneficiary);
+                    actions.runAll(def, "start", beneficiary);
                     beneficiary.sendMessage(format(beneficiary, msg.get(beneficiary, "quest_started").replace("%quest_name%", def.name)));
                     active = true;
                 }
@@ -329,22 +326,22 @@ public final class Engine {
 
                 if (!checkTargetMatch(actor, event, matcher, def)) continue;
 
-                if (checkAnyFail(actor, event, finalCtx, def.condFail)) {
+                if (checkAnyFail(actor, event, ctx, def.condFail)) {
                     final String qid = def.id;
                     if (pending == null) pending = new ArrayList<>();
                     pending.add(() -> {
-                        actions.runAll(def, "fail", beneficiary, finalCtx);
+                        actions.runAll(def, "fail", beneficiary);
                         progress.cancel(uid, name, qid);
                     });
                     continue;
                 }
 
-                if (!checkConditions(actor, event, finalCtx, def.condSuccess)) continue;
+                if (!checkConditions(actor, event, ctx, def.condSuccess)) continue;
 
                 int value = progress.addProgress(uid, name, def.id, 1);
                 if (value >= def.amount) {
                     if (pending == null) pending = new ArrayList<>();
-                    pending.add(() -> handleQuestCompleteOnMain(beneficiary, def, finalCtx));
+                    pending.add(() -> handleQuestCompleteOnMain(beneficiary, def));
                 }
             }
         }
@@ -373,25 +370,22 @@ public final class Engine {
                 if (!progress.isActive(uid, name, def.id)) continue;
                 if (!isSelf && !def.party) continue;
 
-                Map<String, Object> finalCtx = new HashMap<>(ctx);
-                finalCtx.put("player_name", name);
-
-                if (checkAnyFail(actor, null, finalCtx, def.condFail)) {
+                if (checkAnyFail(actor, null, ctx, def.condFail)) {
                     final String qid = def.id;
                     if (pending == null) pending = new ArrayList<>();
                     pending.add(() -> {
-                        actions.runAll(def, "fail", beneficiary, finalCtx);
+                        actions.runAll(def, "fail", beneficiary);
                         progress.cancel(uid, name, qid);
                     });
                     continue;
                 }
 
-                if (!checkConditions(actor, null, finalCtx, def.condSuccess)) continue;
+                if (!checkConditions(actor, null, ctx, def.condSuccess)) continue;
 
                 int value = progress.addProgress(uid, name, def.id, 1);
                 if (value >= def.amount) {
                     if (pending == null) pending = new ArrayList<>();
-                    pending.add(() -> handleQuestCompleteOnMain(beneficiary, def, finalCtx));
+                    pending.add(() -> handleQuestCompleteOnMain(beneficiary, def));
                 }
             }
         }
@@ -428,8 +422,7 @@ public final class Engine {
             if (!completed) {
                 if (!checkAnyFail(player, null, ctx, candidate.condFail) && checkConditions(player, null, ctx, candidate.condSuccess)) {
                     QuestDef finalCandidate = candidate;
-                    final Map<String, Object> finalCtx = ctx;
-                    Bukkit.getScheduler().runTask(plugin, () -> handleQuestCompleteOnMain(player, finalCandidate, finalCtx));
+                    Bukkit.getScheduler().runTask(plugin, () -> handleQuestCompleteOnMain(player, finalCandidate));
                 }
             }
             npcArm.remove(uid);
@@ -445,20 +438,20 @@ public final class Engine {
             if (!checkConditions(player, null, ctx, candidate.condStart)) return;
 
             progress.start(uid, name, candidate);
-            actions.runAll(candidate, "accept", player, ctx);
-            actions.runAll(candidate, "start", player, ctx);
+            actions.runAll(candidate, "accept", player);
+            actions.runAll(candidate, "start", player);
             player.sendMessage(format(player, msg.get(player, "quest_started").replace("%quest_name%", candidate.name)));
         }
         npcArm.put(uid, new NpcArmState(candidate.id, now + NPC_ARM_WINDOW_NANOS));
     }
 
-    private void handleQuestCompleteOnMain(Player player, QuestDef def, Map<String, Object> ctx) {
+    private void handleQuestCompleteOnMain(Player player, QuestDef def) {
         UUID uid = player.getUniqueId();
         String name = player.getName();
-        actions.runAll(def, "success", player, ctx);
+        actions.runAll(def, "success", player);
         progress.complete(uid, name, def);
         player.sendMessage(format(player, msg.get(player, "quest_completed").replace("%quest_name%", def.name)));
-        runCompletionFlow(player, def, ctx);
+        runCompletionFlow(player, def);
     }
 
     public void startQuest(Player p, String questId) {
@@ -484,8 +477,8 @@ public final class Engine {
             return;
         }
         progress.start(uid, name, def);
-        actions.runAll(def, "accept", player, null);
-        actions.runAll(def, "start", player, null);
+        actions.runAll(def, "accept", player);
+        actions.runAll(def, "start", player);
         player.sendMessage(format(player, msg.get(player, "quest_started").replace("%quest_name%", def.name)));
     }
 
@@ -501,7 +494,7 @@ public final class Engine {
             return;
         }
         progress.cancel(player.getUniqueId(), player.getName(), def.id);
-        actions.runAll(def, "cancel", player, null);
+        actions.runAll(def, "cancel", player);
         player.sendMessage(format(player, msg.get(player, "quest_canceled").replace("%quest_name%", def.name)));
     }
 
@@ -512,7 +505,7 @@ public final class Engine {
         Player p = Bukkit.getPlayer(uuid);
         if (p != null && p.isOnline()) {
             QuestDef q = quests.get(id);
-            if (q != null) actions.runAll(q, "cancel", p, null);
+            if (q != null) actions.runAll(q, "cancel", p);
             p.sendMessage(format(p, msg.get(p, "quest_stopped").replace("%quest_name%", q != null ? q.name : id)));
         }
     }
@@ -534,9 +527,9 @@ public final class Engine {
         if (q != null) {
             progress.complete(uuid, playerName, q);
             if (p != null) {
-                actions.runAll(q, "success", p, null);
+                actions.runAll(q, "success", p);
                 p.sendMessage(format(p, msg.get(p, "quest_completed").replace("%quest_name%", q.name)));
-                runCompletionFlow(p, q, null);
+                runCompletionFlow(p, q);
             }
         } else {
             progress.complete(uuid, playerName, id, 0);
@@ -546,9 +539,9 @@ public final class Engine {
     public void forceComplete(Player player, QuestDef def) {
         if (player == null || def == null) return;
         progress.complete(player.getUniqueId(), player.getName(), def);
-        actions.runAll(def, "success", player, null);
+        actions.runAll(def, "success", player);
         player.sendMessage(format(player, msg.get(player, "quest_completed").replace("%quest_name%", def.name)));
-        runCompletionFlow(player, def, null);
+        runCompletionFlow(player, def);
     }
 
     public void abandonAll(Player player) {
@@ -574,7 +567,7 @@ public final class Engine {
         }
     }
 
-    public void runCompletionFlow(Player player, QuestDef def, Map<String, Object> ctx) {
+    public void runCompletionFlow(Player player, QuestDef def) {
         if (def == null) return;
         String nextId = def.nextQuestOnComplete;
         if (nextId != null && !nextId.isEmpty()) {
@@ -590,8 +583,8 @@ public final class Engine {
         }
         if (def.repeat < 0) {
             progress.start(player.getUniqueId(), player.getName(), def);
-            actions.runAll(def, "restart", player, ctx);
-            actions.runAll(def, "repeat", player, ctx);
+            actions.runAll(def, "restart", player);
+            actions.runAll(def, "repeat", player);
         }
     }
 

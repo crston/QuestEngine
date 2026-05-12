@@ -98,20 +98,16 @@ public final class ActionExecutor {
         }
     }
 
-    public void runAll(QuestDef q, String type, Player p, Map<String, Object> ctx) {
+    public void runAll(QuestDef q, String type, Player p) {
         if (q == null || q.actions == null || p == null) return;
         String cacheKey = q.id + type.toLowerCase(Locale.ROOT);
         List<ActionEntry> entries = actionCache.computeIfAbsent(cacheKey, k -> compileActions(q, type));
         if (entries.isEmpty()) return;
-        executeEntries(entries, q, p, ctx);
+        executeEntries(entries, q, p);
     }
 
-    public void run(QuestDef q, String type, Player p, Map<String, Object> ctx) {
-        runAll(q, type, p, ctx);
-    }
-
-    public void runAll(QuestDef q, String type, Player p) {
-        runAll(q, type, p, null);
+    public void run(QuestDef q, String type, Player p) {
+        runAll(q, type, p);
     }
 
     private List<ActionEntry> compileActions(QuestDef q, String type) {
@@ -133,9 +129,14 @@ public final class ActionExecutor {
             String s = line.trim();
 
             Target target = Target.SELF;
-            if (s.toLowerCase(Locale.ROOT).endsWith("server")) {
+            String lowerS = s.toLowerCase(Locale.ROOT);
+
+            if (lowerS.endsWith("server") || lowerS.endsWith("@server")) {
                 target = Target.SERVER;
-                s = s.substring(0, s.length() - 7).trim();
+                s = s.replaceAll("(?i)\\s*server$|\\s*@server$", "").trim();
+            } else if (lowerS.endsWith("@self")) {
+                target = Target.SELF;
+                s = s.replaceAll("(?i)\\s*@self$", "").trim();
             }
 
             if (s.toLowerCase(Locale.ROOT).startsWith("delay ")) {
@@ -182,23 +183,23 @@ public final class ActionExecutor {
         return new ActionEntry(type, params, delay, target);
     }
 
-    private void executeEntries(List<ActionEntry> list, QuestDef q, Player p, Map<String, Object> ctx) {
+    private void executeEntries(List<ActionEntry> list, QuestDef q, Player p) {
         if (list.isEmpty()) return;
 
         int index = 0;
         while (index < list.size()) {
             ActionEntry e = list.get(index);
             if (e.delay > 0) break;
-            executeOne(e, q, p, ctx);
+            executeOne(e, q, p);
             index++;
         }
 
         if (index < list.size()) {
-            scheduleNext(list, index, 0, q, p, ctx);
+            scheduleNext(list, index, 0, q, p);
         }
     }
 
-    private void scheduleNext(List<ActionEntry> list, int index, long elapsed, QuestDef q, Player p, Map<String, Object> ctx) {
+    private void scheduleNext(List<ActionEntry> list, int index, long elapsed, QuestDef q, Player p) {
         if (index >= list.size()) return;
 
         ActionEntry next = list.get(index);
@@ -213,28 +214,28 @@ public final class ActionExecutor {
             while (i < list.size()) {
                 ActionEntry e = list.get(i);
                 if (e.delay > currentTargetDelay) break;
-                executeOne(e, q, p, ctx);
+                executeOne(e, q, p);
                 i++;
             }
 
             if (i < list.size()) {
-                scheduleNext(list, i, currentTargetDelay, q, p, ctx);
+                scheduleNext(list, i, currentTargetDelay, q, p);
             }
         }, wait);
     }
 
-    private void executeOne(ActionEntry e, QuestDef q, Player p, Map<String, Object> ctx) {
+    private void executeOne(ActionEntry e, QuestDef q, Player p) {
         switch (e.type) {
             case MESSAGE -> {
                 String text = e.params.getOrDefault("m", e.params.getOrDefault("t", e.params.get("text")));
-                text = replace(p, text, q, ctx);
+                text = replace(p, text, q);
                 if (text != null && !text.isEmpty()) {
                     p.sendMessage(ChatColor.translateAlternateColorCodes('&', text));
                 }
             }
             case COMMAND -> {
                 String cmd = e.params.getOrDefault("c", e.params.get("cmd"));
-                cmd = replace(p, cmd, q, ctx);
+                cmd = replace(p, cmd, q);
                 if (cmd != null && !cmd.isEmpty()) {
                     if (e.target == Target.SERVER) {
                         Bukkit.dispatchCommand(Bukkit.getConsoleSender(), cmd);
@@ -257,8 +258,8 @@ public final class ActionExecutor {
                 }
             }
             case TITLE -> {
-                String title = replace(p, e.params.getOrDefault("t", e.params.getOrDefault("title", "")), q, ctx);
-                String subtitle = replace(p, e.params.getOrDefault("s", e.params.getOrDefault("subtitle", "")), q, ctx);
+                String title = replace(p, e.params.getOrDefault("t", e.params.getOrDefault("title", "")), q);
+                String subtitle = replace(p, e.params.getOrDefault("s", e.params.getOrDefault("subtitle", "")), q);
                 title = ChatColor.translateAlternateColorCodes('&', title);
                 subtitle = ChatColor.translateAlternateColorCodes('&', subtitle);
 
@@ -306,15 +307,13 @@ public final class ActionExecutor {
         }
     }
 
-    private String replace(Player p, String s, QuestDef q, Map<String, Object> ctx) {
+    private String replace(Player p, String s, QuestDef q) {
         if (s == null) return "";
-        String t = s.replace("player", p.getName()).replace("questname", q.name);
-
-        if (ctx != null && !ctx.isEmpty()) {
-            for (Map.Entry<String, Object> entry : ctx.entrySet()) {
-                t = t.replace("%" + entry.getKey() + "%", String.valueOf(entry.getValue()));
-            }
-        }
+        String t = s.replace("%player%", p.getName())
+                .replace("%player_name%", p.getName())
+                .replace("player", p.getName())
+                .replace("%questname%", q.name)
+                .replace("questname", q.name);
 
         if (papi) {
             return PlaceholderAPI.setPlaceholders(p, t);
