@@ -121,11 +121,10 @@ gui:
   editor:
     title:
       main: "&9퀘스트 에디터 - %tab%"
-      main_prefix: "퀘스트 에디터 -"
       list: "&9리스트 에디터 - %key%"
-      list_prefix: "리스트 에디터 -"
       event_view: "&9이벤트 선택 %page%/%max%"
       captures_view: "&9캡처 에디터"
+      template: "&9추가할 항목 선택"
     tab:
       selected: "&b%name%"
       normal: "&e%name%"
@@ -168,7 +167,7 @@ gui:
       progress:
         label: "진행도 형식"
       model:
-        label: "커스텀 모델 데이터 / 아이템 모델"
+        label: "모델 데이터"
       hint:
         label: "힌트 명령어"
       reward:
@@ -177,22 +176,18 @@ gui:
         label: "카테고리"
       difficulty:
         label: "난이도"
-      left_tip:
-        label: "좌클릭 팁"
-      left_cmd:
-        label: "좌클릭 명령어"
       icon:
         name: "&6표시 아이콘"
-        value: "&b아이템: %value%"
-        left: "&e좌클릭: 아이템 코드 입력"
-        right: "&c우클릭: BOOK으로 초기화"
-        inv: "&a이 탭이 열린 상태에서 인벤토리의 아이템을 클릭하면 해당 아이템으로 설정됩니다."
+        lore:
+          - "&7현재 설정된 아이콘입니다."
+          - "&e좌클릭: 아이템 코드 입력"
+          - "&c우클릭: 기본 책으로 초기화"
         help:
           title: "&b아이콘 설정 도움말"
-          help1: "&7이 탭이 열려있는 동안,"
-          help2: "&7인벤토리의 아이템을 클릭하면 아이콘이 변경됩니다."
-          help3: "&7커스텀 모델 데이터도 자동으로 복사됩니다."
-          help4: "&7모델 데이터가 없는 경우 기본값으로 설정됩니다."
+          lore:
+            - "&7이 탭이 열려있는 동안,"
+            - "&7인벤토리의 아이템을 클릭하면 아이콘이 변경됩니다."
+            - "&7커스텀 모델 데이터도 자동으로 복사됩니다."
     event:
       event:
         label: "이벤트 이름"
@@ -202,33 +197,31 @@ gui:
         label: "퀘스트 유형"
       help:
         title: "&b이벤트 설정 도움말"
-        help1: "&7좌클릭: 이벤트 이름 직접 입력"
-        help2: "&7Shift+좌클릭: 이벤트 목록 열기"
-        help3: "&7우클릭: CUSTOM으로 초기화"
+        lore:
+          - "&e좌클릭: &f이벤트 직접 입력"
+          - "&eShift+좌클릭: &f이벤트 목록 열기"
+          - "&c우클릭: &fCUSTOM으로 초기화"
       entry:
         name: "&6%event%"
         lore1: "&7이 이벤트를 사용합니다."
         lore2: "&e클릭하여 적용"
       prev:
         name: "&e이전 페이지"
-        lore: "&7%page% 페이지"
       next:
         name: "&e다음 페이지"
-        lore: "&7%page% 페이지"
       back:
         name: "&c뒤로가기"
-        lore: "&7에디터로 돌아갑니다"
     custom:
       eventclass:
-        label: "이벤트 클래스 (패키지 포함)"
+        label: "이벤트 클래스"
       playergetter:
         label: "플레이어 추출 메서드"
       captures:
-        label: "&b캡처 (변수 매핑)"
-        entries: "&7항목 수: %count%"
-        left: "&e좌클릭: 수정"
-        right: "&c우클릭: 모두 삭제"
-        format: "&f%key%;%chain%"
+        label: "&b캡처 (Variable Mapping)"
+        lore:
+          - "&7항목 수: %count%"
+          - "&e좌클릭: 수정"
+          - "&c우클릭: 모두 삭제"
     captures:
       entry:
         name: "&f%key%"
@@ -237,11 +230,11 @@ gui:
         right: "&c우클릭: 삭제"
       add:
         name: "&a캡처 추가"
-        lore1: "&7예: %block_type%;getBlock().getType().name()"
-        lore2: "&a좌클릭하여 추가"
+        lore:
+          - "&7예: %block_type%;getBlock().getType().name()"
+          - "&a좌클릭하여 추가"
       back:
         name: "&e뒤로가기"
-        lore: "&7에디터로 돌아갑니다"
     targets:
       targets:
         label: "목표 대상"
@@ -267,22 +260,19 @@ gui:
         restart: "재시작 시 (RESTART)"
         repeat: "반복 시 (REPEAT)"
       lines: "&b액션 수: %count%"
-      left: "&e좌클릭: 액션 수정"
-      right: "&c우클릭: 초기화"
       help:
-        title: "&b액션 예시"
-        help1: "&7msg{m=안녕하세요} @self"
-        help2: "&7cmd{c=give %player% diamond 1} @server"
-        help3: "&7item{i=DIAMOND;a=5}"
-        help4: "&7delay 10"
+        title: "&b액션 도움말"
+        lore:
+          - "&7msg{m=안녕하세요} @self"
+          - "&7cmd{c=give %player% diamond 1} @server"
+          - "&7item{i=DIAMOND;a=5}"
     conditions:
       help:
         title: "&b조건 도움말"
-        help1: "&7PAPI 자리표시자나 커스텀 캡처 변수를 사용할 수 있습니다."
-        help2: "&f%player_level% >= 10 &7-> 레벨 10 이상일 때 통과"
-        help3: "&f%player_health% < 5 &7-> 체력이 5 미만일 때 통과"
-        help4: "&f%block_type% == DIAMOND_ORE &7-> 블록이 일치할 때 통과"
-        help5: "&7모든 조건을 만족해야 합니다 (AND 논리)."
+        lore:
+          - "&7PAPI 자리표시자를 사용할 수 있습니다."
+          - "&f%player_level% >= 10"
+          - "&f%vault_eco_balance% >= 1000"
       start:
         label: "시작 조건"
       success:
@@ -292,14 +282,9 @@ gui:
     options:
       help:
         title: "&b옵션 도움말"
-        help1: "&7초기화 정책 예시:"
-        help2: "&fDAILY &7-> 매일 초기화"
-        help3: "&fWEEKLY &7-> 매주 초기화"
-        help4: "&fNONE &7-> 초기화 안 함"
-        help5: "&7초기화 시간 예시:"
-        help6: "&f04:00 &7-> 매일 새벽 4시"
-        help7: "&f21:30 &7-> 매일 밤 9시 30분"
-        help8: "&724시간 형식을 사용하세요 (HH:MM)"
+        lore:
+          - "&7초기화 정책: DAILY, WEEKLY, NONE"
+          - "&7초기화 시간: 04:00 (24시간 형식)"
       resetpolicy:
         label: "초기화 정책"
       resettime:
@@ -312,7 +297,7 @@ gui:
       next:
         label: "다음 퀘스트 ID"
       required:
-        label: "선행 퀘스트 (Prerequisites)"
+        label: "선행 퀘스트"
     list:
       add:
         name: "&a항목 추가"
@@ -326,21 +311,17 @@ gui:
         name: "&c닫기"
         lore: "&7에디터를 닫습니다."
     prompt:
-      generic_text: "&e값을 입력하세요:"
-      generic_number: "&e숫자를 입력하세요:"
       display_title: "&e표시 이름을 입력하세요:"
       display_icon: "&e아이콘 아이템 코드를 입력하세요:"
       display_progress: "&e진행도 형식을 입력하세요:"
-      display_cmd: "&e커스텀 모델 데이터를 입력하세요 (-1은 없음):"
+      display_cmd: "&e커스텀 모델 데이터를 입력하세요:"
       display_hint: "&e힌트 명령어를 입력하세요:"
       display_reward: "&e보상 설명을 입력하세요:"
       display_category: "&e카테고리를 입력하세요:"
       display_difficulty: "&e난이도를 입력하세요:"
-      display_left_tip: "&e좌클릭 시 표시할 팁 메시지를 입력하세요:"
-      display_left_cmd: "&e좌클릭 시 실행할 명령어를 입력하세요 (예: gps point %player% 100 64 100):"
       event_name: "&e이벤트 이름을 입력하세요:"
       event_type: "&e퀘스트 유형을 입력하세요:"
-      custom_event_class: "&e커스텀 이벤트 클래스를 입력하세요 (패키지 포함):"
+      custom_event_class: "&e이벤트 클래스 경로를 입력하세요:"
       custom_player_getter: "&e플레이어 추출 메서드를 입력하세요:"
       targets_amount: "&e목표 수량을 입력하세요:"
       targets_repeat: "&e반복 횟수를 입력하세요:"
@@ -352,22 +333,28 @@ gui:
       chain_next: "&e다음 퀘스트 ID를 입력하세요:"
       list_add: "&e새 항목을 입력하세요:"
       list_edit: "&e값을 입력하세요 (기존: %old%):"
-      captures_add: "&e캡처를 입력하세요 (예: %block_type%;getBlock().getType().name()):"
+      captures_add: "&e캡처를 입력하세요 (변수;메서드):"
       captures_edit: "&e캡처를 수정하세요 (기존: %line%):"
     error:
       id_empty: "&c퀘스트 ID는 필수 항목입니다!"
-      folder_create: "&c퀘스트 폴더 생성에 실패했습니다!"
-      captures_format: "&c잘못된 형식입니다! 예: %block_type%;getBlock().getType().name()"
-      list_unknown: "&c알 수 없는 리스트 유형입니다!"
     save:
       ok: "&a퀘스트 저장 완료: %id%"
       fail: "&c저장 실패: %msg%"
     template:
       title: "&9추가할 항목 선택"
+      cancel: "&c취소 및 뒤로 가기"
+      custom_input: "&f직접 입력"
+      lore:
+        add: "&7클릭하면 아래 내용이 추가됩니다:"
+        edit: "&8추가 후 값을 수정하세요."
       action:
         msg: "&e메시지 출력"
         cmd: "&c명령어 실행"
         item: "&b아이템 지급"
+        title: "&6타이틀 표시"
+        sound: "&f사운드 재생"
+        particle: "&d파티클 소환"
+        potion: "&5포션 효과"
         delay: "&7대기 시간"
       cond:
         level: "&e레벨 조건"
@@ -375,18 +362,13 @@ gui:
         papi: "&bPAPI 조건"
       target:
         all: "&e모든 대상 허용"
-        block: "&7일반 블록 파괴"
-        mob: "&c일반 몹 처치"
-        mythic_kill: "&4미스틱 몹 처치"
-        citizens: "&a시티즌 NPC 클릭"
-        mythic_interact: "&6미스틱 몹 클릭"
-        vanilla_interact: "&f바닐라 엔티티 클릭"
-        command: "&b명령어 입력"
+        block: "&7블록 파괴"
+        mob: "&c몹 처치"
+        mythic_kill: "&4미스틱몹 처치"
+        citizens: "&a시티즌 클릭"
+        mythic_interact: "&6미스틱몹 클릭"
+        vanilla_interact: "&f엔티티 클릭"
+        command: "&b명령어 수행"
         chat: "&d채팅 입력"
-        multiple: "&8다중 타겟 지정"
+        multiple: "&8다중 대상"
       default: "&e기본 예제 추가"
-      custom_input: "&f직접 채팅으로 입력"
-      cancel: "&c취소 및 뒤로 가기"
-      lore:
-        add: "&7클릭 시 아래 내용이 추가됩니다:"
-        edit: "&8추가 후 클릭하여 값을 수정하세요."

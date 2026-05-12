@@ -324,11 +324,11 @@ public final class QuestEditorMenu implements Listener {
         };
     }
 
-    private void promptOrClear(Player p, boolean L, boolean R, String def, java.util.function.Consumer<String> setter) {
+    private void promptOrClear(Player p, boolean L, boolean R, String def, java.util.function.Consumer<String> setter, String promptKey) {
         if (R) { setter.accept(def); openMainDelayed(p, sessions.get(p.getUniqueId())); }
         else if (L) {
             p.closeInventory();
-            ChatInput.await(p, m(p, "gui.editor.prompt.generic_text"), (pl, s) -> { setter.accept(s); openMainDelayed(pl, sessions.get(pl.getUniqueId())); });
+            ChatInput.await(p, m(p, promptKey), (pl, s) -> { setter.accept(s); openMainDelayed(pl, sessions.get(pl.getUniqueId())); });
         }
     }
 
@@ -385,46 +385,34 @@ public final class QuestEditorMenu implements Listener {
 
         switch (s.tab) {
             case DISPLAY -> {
-                if (slot == 10) promptOrClear(p, L, R, d.displayTitle, v -> d.displayTitle = v);
+                if (slot == 10) promptOrClear(p, L, R, d.displayTitle, v -> d.displayTitle = v, "gui.editor.prompt.display_title");
                 else if (slot == 12 && L) openListDelayed(p, "display.description");
-                else if (slot == 14) promptOrClear(p, L, R, "BOOK", v -> { d.displayIcon = v.toUpperCase(Locale.ROOT); d.displayModel = "-1"; });
-                else if (slot == 16) promptOrClear(p, L, R, "&7%value%/%target%", v -> d.displayProgress = v);
-                else if (slot == 19) {
-                    if (R) { d.displayModel = "-1"; openMainDelayed(p, s); }
-                    else if (L) {
-                        p.closeInventory();
-                        ChatInput.await(p, m(p, "gui.editor.prompt.display_model"), (pl, v) -> {
-                            d.displayModel = v.trim();
-                            openMainDelayed(pl, sessions.get(pl.getUniqueId()));
-                        });
-                    }
-                }
-                else if (slot == 21) promptOrClear(p, L, R, "", v -> d.displayHint = v);
-                else if (slot == 23) promptOrClear(p, L, R, "", v -> d.displayReward = v);
-                else if (slot == 25) promptOrClear(p, L, R, "", v -> d.displayCategory = v);
-                else if (slot == 28) promptOrClear(p, L, R, "", v -> d.displayDifficulty = v);
+                else if (slot == 14) promptOrClear(p, L, R, "BOOK", v -> { d.displayIcon = v.toUpperCase(Locale.ROOT); d.displayModel = "-1"; }, "gui.editor.prompt.display_icon");
+                else if (slot == 16) promptOrClear(p, L, R, "&7%value%/%target%", v -> d.displayProgress = v, "gui.editor.prompt.display_progress");
+                else if (slot == 19) promptOrClear(p, L, R, "-1", v -> d.displayModel = v, "gui.editor.prompt.display_cmd");
+                else if (slot == 21) promptOrClear(p, L, R, "", v -> d.displayHint = v, "gui.editor.prompt.display_hint");
+                else if (slot == 23) promptOrClear(p, L, R, "", v -> d.displayReward = v, "gui.editor.prompt.display_reward");
+                else if (slot == 25) promptOrClear(p, L, R, "", v -> d.displayCategory = v, "gui.editor.prompt.display_category");
+                else if (slot == 28) promptOrClear(p, L, R, "", v -> d.displayDifficulty = v, "gui.editor.prompt.display_difficulty");
             }
             case EVENT -> {
                 if (slot == 10) {
-                    if (c == ClickType.SHIFT_RIGHT) {
-                        d.event = "CUSTOM";
-                        openMainDelayed(p, s);
-                    } else if (R) {
+                    if (c == ClickType.SHIFT_LEFT) openEventSelectDelayed(p);
+                    else if (R) { d.event = "CUSTOM"; openMainDelayed(p, s); }
+                    else if (L) {
                         p.closeInventory();
-                        ChatInput.await(p, m(p, "gui.editor.prompt.generic_text"), (pl, v) -> {
+                        ChatInput.await(p, m(p, "gui.editor.prompt.event_name"), (pl, v) -> {
                             s.draft.event = v.toUpperCase(Locale.ROOT);
                             openMainDelayed(pl, sessions.get(pl.getUniqueId()));
                         });
-                    } else if (L) {
-                        openEventSelectDelayed(p);
                     }
                 }
                 else if (slot == 12 && L) { d.startMode = QuestDef.StartMode.values()[(d.startMode.ordinal()+1)%4]; openMainDelayed(p,s); }
-                else if (slot == 14) promptOrClear(p, L, R, "vanilla", v -> d.type = v.toLowerCase(Locale.ROOT));
+                else if (slot == 14) promptOrClear(p, L, R, "vanilla", v -> d.type = v.toLowerCase(Locale.ROOT), "gui.editor.prompt.event_type");
             }
             case CUSTOM_EVENT -> {
-                if (slot == 10) promptOrClear(p, L, R, "", v -> d.customEventClass = v);
-                else if (slot == 12) promptOrClear(p, L, R, "getPlayer()", v -> d.customPlayerGetter = v);
+                if (slot == 10) promptOrClear(p, L, R, "", v -> d.customEventClass = v, "gui.editor.prompt.custom_event_class");
+                else if (slot == 12) promptOrClear(p, L, R, "getPlayer()", v -> d.customPlayerGetter = v, "gui.editor.prompt.custom_player_getter");
                 else if (slot == 14) { if (R) { d.customCaptures.clear(); openMainDelayed(p,s); } else if (L) openCapturesDelayed(p); }
             }
             case TARGETS -> {
@@ -434,8 +422,8 @@ public final class QuestEditorMenu implements Listener {
                 else if (slot == 16 && L) { p.closeInventory(); ChatInput.await(p, m(p, "gui.editor.prompt.targets_points"), (pl, v) -> { try { d.points = Math.max(0, Integer.parseInt(v.trim())); } catch(Exception ignored){} openMainDelayed(pl, sessions.get(pl.getUniqueId())); }); }
             }
             case META -> {
-                if (slot == 10) promptOrClear(p, L, R, d.id, v -> d.id = v.toLowerCase(Locale.ROOT));
-                else if (slot == 12) promptOrClear(p, L, R, d.name, v -> d.name = v);
+                if (slot == 10) promptOrClear(p, L, R, d.id, v -> d.id = v.toLowerCase(Locale.ROOT), "gui.editor.prompt.meta_id");
+                else if (slot == 12) promptOrClear(p, L, R, d.name, v -> d.name = v, "gui.editor.prompt.meta_name");
             }
             case ACTIONS -> {
                 int[] slots = {10,12,14,19,21,23,28,30};
@@ -448,13 +436,13 @@ public final class QuestEditorMenu implements Listener {
                 if (L) { if (slot==10) openListDelayed(p,"conditions.start"); else if (slot==12) openListDelayed(p,"conditions.success"); else if (slot==14) openListDelayed(p,"conditions.fail"); }
             }
             case OPTIONS -> {
-                if (slot == 10) promptOrClear(p, L, R, "", v -> d.resetPolicy = v);
-                else if (slot == 12) promptOrClear(p, L, R, "", v -> d.resetTime = v);
+                if (slot == 10) promptOrClear(p, L, R, "", v -> d.resetPolicy = v, "gui.editor.prompt.options_resetpolicy");
+                else if (slot == 12) promptOrClear(p, L, R, "", v -> d.resetTime = v, "gui.editor.prompt.options_resettime");
                 else if (slot == 28 && L) { d.isPublic = !d.isPublic; openMainDelayed(p, s); }
                 else if (slot == 30 && L) { d.party = !d.party; openMainDelayed(p, s); }
             }
             case CHAIN -> {
-                if (slot == 10) promptOrClear(p, L, R, "", v -> d.nextQuestOnComplete = v);
+                if (slot == 10) promptOrClear(p, L, R, "", v -> d.nextQuestOnComplete = v, "gui.editor.prompt.chain_next");
                 else if (slot == 12 && L) openListDelayed(p, "requiredQuests");
             }
         }
@@ -493,7 +481,7 @@ public final class QuestEditorMenu implements Listener {
         if (slot == 49) { openMainDelayed(p, s); return; }
 
         ItemStack item = e.getCurrentItem();
-        if (item != null && item.getType() != Material.AIR) {
+        if (item != null && item.getType() != Material.AIR && item.hasItemMeta()) {
             String name = ChatColor.stripColor(item.getItemMeta().getDisplayName());
             s.draft.event = name;
             openMainDelayed(p, s);
@@ -513,7 +501,7 @@ public final class QuestEditorMenu implements Listener {
             if (e.getClick().isRightClick()) { s.draft.customCaptures.remove(key); openCapturesDelayed(p); }
             else if (e.getClick().isLeftClick()) {
                 p.closeInventory();
-                ChatInput.await(p, m(p, "gui.editor.prompt.captures_edit"), (pl, v) -> { if (applyCaptureLine(s.draft, v, true)) openCapturesDelayed(pl); });
+                ChatInput.await(p, m(p, "gui.editor.prompt.captures_edit").replace("%line%", key + ";" + entries.get(idx).getValue()), (pl, v) -> { if (applyCaptureLine(s.draft, v, true)) openCapturesDelayed(pl); });
             }
         } else if (idx == entries.size()) {
             p.closeInventory();
@@ -530,7 +518,7 @@ public final class QuestEditorMenu implements Listener {
         if (slot == 45) { openListSelection(p, page - 1); return; }
         if (slot == 53) { openListSelection(p, page + 1); return; }
         ItemStack item = e.getCurrentItem();
-        if (item != null && item.getType() == Material.PAPER) {
+        if (item != null && item.getType() == Material.PAPER && item.hasItemMeta()) {
             String qId = ChatColor.stripColor(item.getItemMeta().getDisplayName());
             QuestDef def = plugin.quests().get(qId);
             if (def != null) openEdit(p, def);
@@ -613,12 +601,8 @@ public final class QuestEditorMenu implements Listener {
             inv.setItem(10, templateItem(p, m(p, "gui.editor.template.cond.level"), "%player_level% >= 10"));
             inv.setItem(11, templateItem(p, m(p, "gui.editor.template.cond.world"), "%player_world% == 'world_nether'"));
             inv.setItem(12, templateItem(p, m(p, "gui.editor.template.cond.papi"), "%vault_eco_balance% >= 1000"));
-
-            String invLang = plugin.msg().get(p, "gui.editor.template.cond.gui");
-            inv.setItem(13, templateItem(p, invLang != null && !invLang.isEmpty() ? invLang : "GUI Condition", "%gui_id% == 'shop'"));
-
-            String noneLang = plugin.msg().get(p, "gui.editor.template.cond.none");
-            inv.setItem(14, templateItem(p, noneLang != null && !noneLang.isEmpty() ? noneLang : "Always Pass", "NONE"));
+            inv.setItem(13, templateItem(p, "GUI Condition", "%gui_id% == 'shop'"));
+            inv.setItem(14, templateItem(p, "Always Pass", "NONE"));
         } else if (key.equals("targets")) {
             inv.setItem(10, templateItem(p, m(p, "gui.editor.template.target.all"), "*"));
             inv.setItem(11, templateItem(p, m(p, "gui.editor.template.target.block"), "STONE"));
