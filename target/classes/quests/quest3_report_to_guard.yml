@@ -2,7 +2,7 @@ name: "Report to the Guard Captain"
 id: report_to_guard
 event: ENTITY_INTERACT
 targets:
-  - CITIZENS_2
+  - CITIZENS:2
 amount: 1
 points: 2
 start_mode: NPC

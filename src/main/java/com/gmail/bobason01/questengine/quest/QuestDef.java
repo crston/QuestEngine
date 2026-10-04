@@ -1,5 +1,6 @@
 package com.gmail.bobason01.questengine.quest;
 
+import com.gmail.bobason01.questengine.runtime.EventAliases;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
 
@@ -108,10 +109,37 @@ public final class QuestDef {
     public boolean matchesTarget(String candidate) {
         if (!hasTarget()) return true;
         if (candidate == null) return false;
+        String c = normalizeInteractTarget(candidate);
         for (String t : targets) {
-            if (t.equalsIgnoreCase(candidate)) return true;
+            if (t == null) continue;
+            if ("*".equals(t)) return true;
+            if (normalizeInteractTarget(t).equalsIgnoreCase(c)) return true;
         }
         return false;
+    }
+
+    /**
+     * Normalizes interact target ids:
+     * CITIZENS_1 → CITIZENS:1, ENTITY_ZOMBIE → ENTITY:ZOMBIE
+     */
+    public static String normalizeInteractTarget(String raw) {
+        if (raw == null) return "";
+        String s = raw.trim();
+        if (s.isEmpty()) return s;
+        if (s.indexOf(':') >= 0) return s;
+
+        if (s.length() > 9 && s.regionMatches(true, 0, "CITIZENS_", 0, 9)) {
+            return "CITIZENS:" + s.substring(9);
+        }
+        if (s.length() > 7 && s.regionMatches(true, 0, "ENTITY_", 0, 7)) {
+            return "ENTITY:" + s.substring(7);
+        }
+        if (s.length() > 10 && s.regionMatches(true, 0, "MYTHICMOBS_", 0, 10)
+                && !s.regionMatches(true, 0, "MYTHICMOBS_ENTITY", 0, 16)
+                && !s.regionMatches(true, 0, "MYTHICMOBS_KILL", 0, 14)) {
+            return "MYTHICMOBS:" + s.substring(10);
+        }
+        return s;
     }
 
     public static QuestDef load(File file) {
@@ -119,12 +147,19 @@ public final class QuestDef {
 
         String id = file.getName().replace(".yml", "").toLowerCase(Locale.ROOT);
         String name = yml.getString("name", id);
-        String event = yml.getString("event", "CUSTOM");
+        String event = EventAliases.canonicalize(yml.getString("event", "CUSTOM"));
         String type = yml.getString("type", "vanilla");
 
         List<String> targets = new ArrayList<>();
-        if (yml.isList("targets")) targets.addAll(yml.getStringList("targets"));
-        else if (yml.isString("target")) targets.add(yml.getString("target"));
+        if (yml.isList("targets")) {
+            for (String t : yml.getStringList("targets")) {
+                if (t == null || t.isBlank()) continue;
+                targets.add(normalizeInteractTarget(t.trim()));
+            }
+        } else if (yml.isString("target")) {
+            String t = yml.getString("target");
+            if (t != null && !t.isBlank()) targets.add(normalizeInteractTarget(t.trim()));
+        }
 
         int amount = yml.getInt("amount", 1);
         int repeat = yml.getInt("repeat", 0);

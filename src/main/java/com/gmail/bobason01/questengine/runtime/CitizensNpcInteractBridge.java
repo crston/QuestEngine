@@ -1,50 +1,58 @@
 package com.gmail.bobason01.questengine.runtime;
 
-import net.citizensnpcs.api.CitizensAPI;
-import net.citizensnpcs.api.npc.NPC;
+import org.bukkit.Bukkit;
 import org.bukkit.entity.Entity;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.inventory.EquipmentSlot;
 
+import java.lang.reflect.Method;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * Soft-depend Citizens bridge (no compile-time Citizens dependency).
+ */
 public final class CitizensNpcInteractBridge implements Listener {
 
     private final Engine engine;
-
-    // String Concatenation 방지를 위한 ID 캐시
     private final Map<Integer, String> keyCache = new ConcurrentHashMap<>();
+
+    private final Object registry;
+    private final Method getNpc;
 
     public CitizensNpcInteractBridge(Engine engine) {
         this.engine = engine;
+        try {
+            Class<?> api = Class.forName("net.citizensnpcs.api.CitizensAPI");
+            Method getRegistry = api.getMethod("getNPCRegistry");
+            this.registry = getRegistry.invoke(null);
+            this.getNpc = registry.getClass().getMethod("getNPC", Entity.class);
+        } catch (Throwable t) {
+            throw new IllegalStateException("Citizens API unavailable", t);
+        }
     }
 
     @EventHandler(ignoreCancelled = true)
     public void onInteract(PlayerInteractEntityEvent e) {
-        // 1. 왼손(Off Hand) 이벤트는 무시 (이벤트 호출량 50% 감소)
         if (e.getHand() != EquipmentSlot.HAND) return;
 
         Entity clicked = e.getRightClicked();
-        if (clicked == null) return;
+        if (clicked == null || !clicked.hasMetadata("NPC")) return;
 
-        // 2. 메타데이터 검사 (Fast-Fail)
-        // 일반 몹/엔티티 클릭 시 무거운 Citizens Registry 조회를 하지 않도록 방어
-        if (!clicked.hasMetadata("NPC")) return;
-
-        // 3. 실제 조회
-        NPC npc = CitizensAPI.getNPCRegistry().getNPC(clicked);
-        if (npc == null) return;
-
-        // 4. 문자열 생성 비용 절감 (캐싱된 키 사용)
-        String key = getKey(npc.getId());
-
-        engine.handleNpcInteract(e.getPlayer(), key);
+        try {
+            Object npc = getNpc.invoke(registry, clicked);
+            if (npc == null) return;
+            Method getId = npc.getClass().getMethod("getId");
+            int id = ((Number) getId.invoke(npc)).intValue();
+            engine.handleNpcInteract(e.getPlayer(), keyCache.computeIfAbsent(id, i -> "CITIZENS:" + i));
+        } catch (Throwable ignored) {
+            // NPC lookup race / unload — ignore
+        }
     }
 
-    private String getKey(int id) {
-        return keyCache.computeIfAbsent(id, i -> "CITIZENS:" + i);
+    public static boolean isAvailable() {
+        return Bukkit.getPluginManager().isPluginEnabled("Citizens");
     }
 }

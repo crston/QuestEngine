@@ -2,7 +2,7 @@ name: "Talk to the Villager"
 id: talk_to_villager
 event: ENTITY_INTERACT
 targets:
-  - CITIZENS_1
+  - CITIZENS:1
 amount: 1
 points: 1
 public: true

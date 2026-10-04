@@ -43,14 +43,7 @@ public final class YamlStorage implements StorageProvider {
             int points = yml.getInt(qid + ".points", 0);
             int repeatCount = yml.getInt(qid + ".repeat_count", 0);
 
-            if (active) d.start(qid);
-            if (value > 0) d.add(qid, value);
-            if (repeatCount > 0) d.setRepeatCount(qid, repeatCount);
-
-            if (completed) {
-                d.complete(qid, points);
-                if (d.getRepeatCount(qid) == 0) d.setRepeatCount(qid, 1);
-            }
+            d.restoreQuest(qid, active, completed, value, points, repeatCount);
         }
         return d;
     }
@@ -60,16 +53,14 @@ public final class YamlStorage implements StorageProvider {
         File f = fileOf(d.getId());
         YamlConfiguration yml = new YamlConfiguration();
 
-        Set<String> all = new HashSet<>();
-        all.addAll(d.activeIds());
-        all.addAll(d.completedIds());
-
-        for (String qid : all) {
-            yml.set(qid + ".active", d.isActive(qid));
-            yml.set(qid + ".completed", d.isCompleted(qid));
-            yml.set(qid + ".value", d.valueOf(qid));
-            yml.set(qid + ".points", d.pointsOf(qid));
-            yml.set(qid + ".repeat_count", d.getRepeatCount(qid));
+        for (var entry : d.snapshot().entrySet()) {
+            String qid = entry.getKey();
+            PlayerData.QuestState state = entry.getValue();
+            yml.set(qid + ".active", state.active());
+            yml.set(qid + ".completed", state.completed());
+            yml.set(qid + ".value", state.value());
+            yml.set(qid + ".points", state.points());
+            yml.set(qid + ".repeat_count", state.repeatCount());
         }
 
         yml.set("meta_language", d.getLanguage());

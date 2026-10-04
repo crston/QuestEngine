@@ -12,9 +12,12 @@ import com.gmail.bobason01.questengine.party.PartyHook;
 import com.gmail.bobason01.questengine.papi.QuestPapiExpansion;
 import com.gmail.bobason01.questengine.progress.ProgressRepository;
 import com.gmail.bobason01.questengine.quest.QuestRepository;
+import com.gmail.bobason01.questengine.runtime.CitizensNpcInteractBridge;
+import com.gmail.bobason01.questengine.runtime.DefaultEntityInteractBridge;
 import com.gmail.bobason01.questengine.runtime.DynamicEventListener;
 import com.gmail.bobason01.questengine.runtime.Engine;
 import com.gmail.bobason01.questengine.runtime.EventDispatcher;
+import com.gmail.bobason01.questengine.runtime.MythicmobsNpcInteractBridge;
 import com.gmail.bobason01.questengine.util.Msg;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
@@ -26,7 +29,9 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.net.URISyntaxException;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 
@@ -40,18 +45,17 @@ public final class QuestEnginePlugin extends JavaPlugin {
     private Msg msg;
     private QuestGuiManager gui;
     private QuestEditorMenu editorMenu;
+    private DynamicEventListener dynamicEvents;
 
     @Override
     public void onEnable() {
         long start = System.currentTimeMillis();
         getLogger().info("[QuestEngine] Initializing...");
 
-        // 1. Config & Language Files Setup
         saveDefaultConfig();
         setupLanguageFiles();
         msg = new Msg(this);
 
-        // 2. Quest Folder Setup
         File questDir = new File(getDataFolder(), getConfig().getString("quests.folder", "quests"));
         if (!questDir.exists()) {
             if (questDir.mkdirs()) {
@@ -64,48 +68,40 @@ public final class QuestEnginePlugin extends JavaPlugin {
             }
         }
 
-        // 3. Core Components Init
         quests = new QuestRepository(this, questDir);
         progress = new ProgressRepository(this);
 
-        // 4. Thread Pool (Async Operations)
-        asyncPool = Executors.newFixedThreadPool(
-                Math.max(2, Runtime.getRuntime().availableProcessors()),
+        int cores = Math.max(2, Runtime.getRuntime().availableProcessors());
+        asyncPool = new ThreadPoolExecutor(
+                cores,
+                cores,
+                60L,
+                TimeUnit.SECONDS,
+                new LinkedBlockingQueue<>(10_000),
                 r -> {
-                    Thread t = new Thread(r, "QuestEngine-AsyncPool");
+                    Thread t = new Thread(r, "QuestEngine-Worker");
                     t.setDaemon(true);
+                    t.setPriority(Thread.NORM_PRIORITY - 1);
                     return t;
-                });
+                },
+                new ThreadPoolExecutor.CallerRunsPolicy()
+        );
 
         actions = new ActionExecutor(this, msg);
         engine = new Engine(this, quests, progress, actions, msg, asyncPool);
 
-        // 5. Preload Online Players
         for (Player p : Bukkit.getOnlinePlayers()) {
             progress.of(p.getUniqueId(), p.getName());
         }
 
-        // 6. Event Listeners Registration
-        Bukkit.getScheduler().runTask(this, () -> {
-            try {
-                new EventDispatcher(this, engine);
-                new DynamicEventListener(this, engine, quests);
-                getLogger().info("[QuestEngine] Event listeners registered.");
-            } catch (Throwable t) {
-                getLogger().warning("[QuestEngine] Event registration failed: " + t.getMessage());
-            }
-        });
+        Bukkit.getScheduler().runTask(this, this::registerListeners);
 
-        // 7. Hooks (Party & PAPI)
         PartyHook.init(this, getConfig());
         if (Bukkit.getPluginManager().isPluginEnabled("PlaceholderAPI")) {
             new QuestPapiExpansion(this).register();
         }
 
-        // 8. Chat & GUI & Commands Init
-        // [IMPORTANT] ChatInput MUST be initialized here to capture chat input!
         ChatInput.init(this);
-
         gui = new QuestGuiManager(this);
         editorMenu = new QuestEditorMenu(this);
 
@@ -118,10 +114,43 @@ public final class QuestEnginePlugin extends JavaPlugin {
         getLogger().info("[QuestEngine] Enabled successfully in " + took + "ms");
     }
 
+    private void registerListeners() {
+        try {
+            new EventDispatcher(this, engine);
+            dynamicEvents = new DynamicEventListener(this, engine, quests);
+
+            Bukkit.getPluginManager().registerEvents(new DefaultEntityInteractBridge(engine), this);
+            getLogger().info("[QuestEngine] Default entity interact bridge registered.");
+
+            if (Bukkit.getPluginManager().isPluginEnabled("Citizens")) {
+                try {
+                    Bukkit.getPluginManager().registerEvents(new CitizensNpcInteractBridge(engine), this);
+                    getLogger().info("[QuestEngine] Citizens NPC interact bridge registered.");
+                } catch (Throwable t) {
+                    getLogger().warning("[QuestEngine] Citizens bridge failed: " + t.getMessage());
+                }
+            }
+
+            if (Bukkit.getPluginManager().isPluginEnabled("MythicMobs")) {
+                try {
+                    Bukkit.getPluginManager().registerEvents(new MythicmobsNpcInteractBridge(engine), this);
+                    getLogger().info("[QuestEngine] MythicMobs interact bridge registered.");
+                } catch (Throwable t) {
+                    getLogger().warning("[QuestEngine] MythicMobs bridge failed: " + t.getMessage());
+                }
+            }
+
+            getLogger().info("[QuestEngine] Event listeners registered.");
+        } catch (Throwable t) {
+            getLogger().warning("[QuestEngine] Event registration failed: " + t.getMessage());
+        }
+    }
+
     @Override
     public void onDisable() {
         getLogger().info("[QuestEngine] Shutting down...");
         try {
+            if (dynamicEvents != null) dynamicEvents.unregisterAll();
             HandlerList.unregisterAll(this);
             if (engine != null) engine.shutdown();
             if (progress != null) progress.close();
@@ -132,14 +161,15 @@ public final class QuestEnginePlugin extends JavaPlugin {
         }
     }
 
-    /**
-     * 전체 리로드 (설정, 퀘스트 데이터, 언어 파일)
-     */
     public void reloadAll() {
         reloadConfig();
         quests.reload();
         msg.reload();
+        actions.clearCache();
         engine.refreshEventCache();
+        if (dynamicEvents != null) {
+            dynamicEvents.registerAll(quests);
+        }
         getLogger().info("[QuestEngine] All components reloaded successfully.");
     }
 
@@ -152,7 +182,6 @@ public final class QuestEnginePlugin extends JavaPlugin {
         }
     }
 
-    // --- Accessors ---
     public Engine engine() { return engine; }
     public QuestRepository quests() { return quests; }
     public ProgressRepository progress() { return progress; }
@@ -160,6 +189,7 @@ public final class QuestEnginePlugin extends JavaPlugin {
     public QuestGuiManager gui() { return gui; }
     public ExecutorService asyncPool() { return asyncPool; }
     public QuestEditorMenu editorMenu() { return editorMenu; }
+    public DynamicEventListener dynamicEvents() { return dynamicEvents; }
 
     public void runAsync(Runnable task) {
         if (asyncPool != null && !asyncPool.isShutdown()) asyncPool.submit(task);
@@ -186,7 +216,7 @@ public final class QuestEnginePlugin extends JavaPlugin {
 
                 try (InputStream in = jar.getInputStream(entry);
                      FileOutputStream out = new FileOutputStream(outFile)) {
-                    byte[] buf = new byte[4096];
+                    byte[] buf = new byte[8192];
                     int len;
                     while ((len = in.read(buf)) > 0) out.write(buf, 0, len);
                 }

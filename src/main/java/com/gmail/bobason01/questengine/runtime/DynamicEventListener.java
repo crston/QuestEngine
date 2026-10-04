@@ -21,13 +21,11 @@ public final class DynamicEventListener {
     private final Engine engine;
 
     private final List<Listener> activeListeners = new ArrayList<>();
-
     private final Map<String, Class<? extends Event>> classCache = new ConcurrentHashMap<>();
 
     public DynamicEventListener(QuestEnginePlugin plugin, Engine engine, QuestRepository repo) {
         this.plugin = plugin;
         this.engine = engine;
-
         Bukkit.getScheduler().runTaskLater(plugin, () -> registerAll(repo), 20L);
     }
 
@@ -51,8 +49,10 @@ public final class DynamicEventListener {
             if (def == null) continue;
 
             if (def.event != null && !def.event.isEmpty()) {
-                String evt = def.event.toUpperCase(Locale.ROOT);
-                if (!evt.equals("CUSTOM") && !evt.equals("CUSTOM_EVENT") && !evt.equals("NONE")) {
+                String evt = EventAliases.canonicalize(def.event);
+                if (!evt.equals("CUSTOM") && !evt.equals("CUSTOM_EVENT") && !evt.equals("NONE")
+                        && !evt.equals("ENTITY_INTERACT")) {
+                    // ENTITY_INTERACT is owned by interact bridges
                     uniqueEvents.add(evt);
                 }
             }
@@ -64,13 +64,13 @@ public final class DynamicEventListener {
 
         if (uniqueEvents.isEmpty()) {
             plugin.getLogger().info("[QuestEngine] No dynamic events found to register.");
+            engine.rebuildCustomEventIndex();
             return;
         }
 
         int hookedCount = 0;
         for (String evtName : uniqueEvents) {
             Class<? extends Event> eventClass = resolveEventClass(evtName);
-
             if (eventClass == null) {
                 plugin.getLogger().warning("[QuestEngine] Cannot resolve event class: " + evtName);
                 continue;
@@ -84,28 +84,23 @@ public final class DynamicEventListener {
                 };
 
                 Listener listener = new Listener() {};
-
                 pm.registerEvent(eventClass, listener, EventPriority.MONITOR, executor, plugin, true);
-
                 activeListeners.add(listener);
                 hookedCount++;
-
-                plugin.getLogger().info("[QuestEngine] Successfully hooked event: " + eventClass.getName());
-
             } catch (Throwable t) {
                 plugin.getLogger().severe("[QuestEngine] Failed to hook event " + evtName + ": " + t.getMessage());
             }
         }
 
         plugin.getLogger().info("[QuestEngine] Dynamic registration finished. Hooked " + hookedCount + " events.");
-
         engine.rebuildCustomEventIndex();
     }
 
     @SuppressWarnings("unchecked")
     private Class<? extends Event> resolveEventClass(String name) {
-        String key = name.toUpperCase(Locale.ROOT);
-        if (classCache.containsKey(key)) return classCache.get(key);
+        String key = EventAliases.canonicalize(name);
+        Class<? extends Event> cached = classCache.get(key);
+        if (cached != null) return cached;
 
         Class<? extends Event> found = null;
 
@@ -114,10 +109,12 @@ public final class DynamicEventListener {
             case "BLOCK_PLACE": found = org.bukkit.event.block.BlockPlaceEvent.class; break;
             case "BLOCK_BURN": found = org.bukkit.event.block.BlockBurnEvent.class; break;
             case "BLOCK_EXPLODE": found = org.bukkit.event.block.BlockExplodeEvent.class; break;
-            case "BLOCK_FERTILizing": found = org.bukkit.event.block.BlockFertilizeEvent.class; break;
+            case "BLOCK_FERTILIZING":
+            case "FARMING": found = org.bukkit.event.block.BlockFertilizeEvent.class; break;
 
             case "ENTITY_DEATH":
             case "PLAYER_KILL":
+            case "ENTITY_KILL":
             case "MOBKILLING": found = org.bukkit.event.entity.EntityDeathEvent.class; break;
             case "TAMING": found = org.bukkit.event.entity.EntityTameEvent.class; break;
             case "BREEDING":
@@ -148,8 +145,7 @@ public final class DynamicEventListener {
             case "BUCKET_EMPTY": found = org.bukkit.event.player.PlayerBucketEmptyEvent.class; break;
             case "SHEARING":
             case "BLOCK_SHEARING": found = org.bukkit.event.player.PlayerShearEntityEvent.class; break;
-            case "ITEM_INTERACT":
-            case "FARMING": found = org.bukkit.event.player.PlayerInteractEvent.class; break;
+            case "ITEM_INTERACT": found = org.bukkit.event.player.PlayerInteractEvent.class; break;
             case "ENTITY_INTERACT": found = org.bukkit.event.player.PlayerInteractEntityEvent.class; break;
 
             case "ITEM_CRAFT": found = org.bukkit.event.inventory.CraftItemEvent.class; break;
@@ -158,17 +154,21 @@ public final class DynamicEventListener {
             case "PLAYER_ARMOR": found = org.bukkit.event.inventory.InventoryClickEvent.class; break;
             case "ITEM_CONSUME": found = org.bukkit.event.player.PlayerItemConsumeEvent.class; break;
             case "ITEM_PICKUP": found = org.bukkit.event.entity.EntityPickupItemEvent.class; break;
-            case "ITEM_DROP": found = org.bukkit.event.player.PlayerDropItemEvent.class; break;
+            case "ITEM_DROP":
+            case "BLOCK_ITEM_DROPPING": found = org.bukkit.event.player.PlayerDropItemEvent.class; break;
             case "ITEM_ENCHANT":
             case "ENCHANTING": found = org.bukkit.event.enchantment.EnchantItemEvent.class; break;
             case "ITEM_BREAK": found = org.bukkit.event.player.PlayerItemBreakEvent.class; break;
             case "ITEM_DAMAGE": found = org.bukkit.event.player.PlayerItemDamageEvent.class; break;
             case "ITEM_MENDING": found = org.bukkit.event.player.PlayerItemMendEvent.class; break;
+            case "ITEM_HELD":
+            case "ITEM_SELECT": found = org.bukkit.event.player.PlayerItemHeldEvent.class; break;
             case "SMITHING": found = org.bukkit.event.inventory.SmithItemEvent.class; break;
             case "BREWING": found = org.bukkit.event.inventory.BrewEvent.class; break;
             case "ITEM_REPAIR": found = org.bukkit.event.inventory.PrepareAnvilEvent.class; break;
             case "TRADING": found = org.bukkit.event.inventory.TradeSelectEvent.class; break;
             case "COMPOSTING": found = org.bukkit.event.inventory.InventoryMoveItemEvent.class; break;
+            case "SMELTING": found = org.bukkit.event.inventory.FurnaceSmeltEvent.class; break;
 
             case "GUIMANAGER_OPEN":
                 try { found = (Class<? extends Event>) Class.forName("com.gmail.bobason01.event.GUIOpenEvent"); } catch (Exception ignored) {}
@@ -177,12 +177,19 @@ public final class DynamicEventListener {
                 try { found = (Class<? extends Event>) Class.forName("com.gmail.bobason01.api.event.HotkeyInputEvent"); } catch (Exception ignored) {}
                 break;
 
-            case "WORLD_CHUNK_LOAD": found = org.bukkit.event.world.ChunkLoadEvent.class; break;
+            case "WORLD_CHUNK_LOAD":
+            case "CHUNK_LOAD": found = org.bukkit.event.world.ChunkLoadEvent.class; break;
+
             case "MYTHICMOBS_ENTITY_KILL":
+            case "MYTHICMOBS_KILL":
                 try { found = (Class<? extends Event>) Class.forName("io.lumine.mythic.bukkit.events.MythicMobDeathEvent"); } catch (Exception ignored) {}
                 break;
             case "MYTHICMOBS_ENTITY_SPAWN":
                 try { found = (Class<? extends Event>) Class.forName("io.lumine.mythic.bukkit.events.MythicMobSpawnEvent"); } catch (Exception ignored) {}
+                break;
+
+            case "BUCKET_ENTITY":
+                try { found = (Class<? extends Event>) Class.forName("org.bukkit.event.player.PlayerBucketEntityEvent"); } catch (Exception ignored) {}
                 break;
         }
 

@@ -52,14 +52,19 @@ public final class QuestEditorMenu implements Listener {
 
     private static final List<String> BUILTIN_EVENTS = List.of(
             "NONE", "BLOCK_BREAK", "BLOCK_BURN", "BLOCK_EXPLODE", "BLOCK_FERTILIZING", "BLOCK_PLACE",
-            "BREEDING", "BREWING", "DEAL_DAMAGE", "PLAYER_ATTACK", "ENTITY_INTERACT", "FISHING",
+            "BLOCK_IGNITE", "BLOCK_SHEARING", "BLOCK_STRIP",
+            "BREEDING", "BREWING", "BUCKET_EMPTY", "BUCKET_FILL", "COMPOSTING", "CURING", "DEAL_DAMAGE",
+            "DISTANCE_FROM", "ENCHANTING", "ENTITY_INTERACT", "ENTITY_KILL", "ENTITY_SPAWN", "FARMING", "FISHING",
             "GUIMANAGER_OPEN", "HOTKEY_INPUT", "ITEM_BREAK", "ITEM_CONSUME", "ITEM_CRAFT", "ITEM_DAMAGE",
-            "ITEM_DROP", "ITEM_ENCHANT", "ITEM_MENDING", "ITEM_MOVE", "ITEM_PICKUP",
-            "ITEM_REPAIR", "MOBKILLING", "MYTHICMOBS_ENTITY_KILL", "MYTHICMOBS_ENTITY_SPAWN",
-            "PLAYER_ARMOR", "PLAYER_BED_ENTER", "PLAYER_CHAT", "PLAYER_COMMAND",
-            "PLAYER_EXP_GAIN", "PLAYER_LEAVE", "PLAYER_LEVELUP", "PLAYER_PRE_JOIN",
-            "PLAYER_RESPAWN", "PLAYER_SWAP_HAND", "PLAYER_TELEPORT", "PLAYER_WALK",
-            "DISTANCE_FROM", "SMITHING", "TAMING", "WORLD_CHUNK_LOAD", "CRAFTSLOT_CLICK"
+            "ITEM_DROP", "ITEM_ENCHANT", "ITEM_HELD", "ITEM_INTERACT", "ITEM_MENDING", "ITEM_MOVE",
+            "ITEM_PICKUP", "ITEM_REPAIR",             "MILKING", "MYTHICMOBS_ENTITY_KILL", "MYTHICMOBS_KILL",
+            "MYTHICMOBS_ENTITY_SPAWN", "PLAYER_ARMOR", "PLAYER_ATTACK", "PLAYER_BARTERING", "PLAYER_BED_ENTER",
+            "PLAYER_CHAT", "PLAYER_COMMAND", "PLAYER_DEATH", "PLAYER_EXP_GAIN", "PLAYER_KILL", "PLAYER_LEAVE",
+            "PLAYER_LEVELUP", "PLAYER_PRE_JOIN", "PLAYER_RESPAWN", "PLAYER_SNEAK", "PLAYER_SPRINT",
+            "PLAYER_SWAP_HAND", "PLAYER_TELEPORT", "PLAYER_WALK", "PLAYER_WORLD_CHANGE", "PROJECTILE_LAUNCH",
+            "SHEARING", "SMELTING", "SMITHING", "TAMING", "TRADING", "VEHICLE_ENTER", "VEHICLE_EXIT",
+            "WORLD_CHUNK_LOAD", "CHUNK_LOAD",
+            "CRAFTSLOT_CLICK", "CUSTOM"
     );
 
     public QuestEditorMenu(QuestEnginePlugin plugin) {
@@ -533,7 +538,7 @@ public final class QuestEditorMenu implements Listener {
             File folder = new File(plugin.getDataFolder(), plugin.getConfig().getString("quests.folder", "quests"));
             if (!folder.exists()) folder.mkdirs();
             yml.save(new File(folder, def.id + ".yml"));
-            plugin.quests().reload();
+            plugin.reloadAll();
             p.sendMessage(m(p, "gui.editor.save.ok").replace("%id%", def.id));
         } catch (Exception ex) { p.sendMessage(m(p, "gui.editor.save.fail").replace("%msg%", ex.getMessage())); ex.printStackTrace(); }
     }

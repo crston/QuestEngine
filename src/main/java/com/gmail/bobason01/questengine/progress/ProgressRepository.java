@@ -126,6 +126,10 @@ public final class ProgressRepository {
         return of(id, name).isCompleted(norm(qid));
     }
 
+    public boolean hasSatisfiedRequirement(UUID id, String name, String qid) {
+        return of(id, name).hasSatisfiedRequirement(norm(qid));
+    }
+
     public boolean canStart(UUID id, String name, QuestDef def) {
         if (def == null) return false;
         return of(id, name).canStart(def.id, def.repeat);
@@ -158,6 +162,20 @@ public final class ProgressRepository {
         d.complete(norm(def.id), def.points, def.repeat);
         updatePoints(id, d.totalPoints());
         markDirty(id);
+    }
+
+    public long advanceForCompletion(UUID id, String name, QuestDef def) {
+        long revision = of(id, name).advanceForCompletion(def.id, 1, def.amount);
+        markDirty(id);
+        return revision;
+    }
+
+    public boolean completeIfActive(UUID id, String name, QuestDef def, long revision) {
+        PlayerData d = of(id, name);
+        if (!d.completeIfActive(def.id, def.points, def.repeat, revision)) return false;
+        updatePoints(id, d.totalPoints());
+        markDirty(id);
+        return true;
     }
 
     public int addProgress(UUID id, String name, String qid, int amt) {

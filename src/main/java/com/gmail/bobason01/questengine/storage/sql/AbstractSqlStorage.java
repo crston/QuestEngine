@@ -69,10 +69,7 @@ public abstract class AbstractSqlStorage implements StorageProvider {
                         int points = rs.getInt(5);
                         int repeat = rs.getInt(6);
 
-                        if (active) d.start(qid);
-                        if (completed) d.complete(qid, points, -1);
-                        if (value > 0) d.add(qid, value);
-                        if (repeat > 0) d.setRepeatCount(qid, repeat);
+                        d.restoreQuest(qid, active, completed, value, points, repeat);
                     }
                 }
             }
@@ -100,18 +97,15 @@ public abstract class AbstractSqlStorage implements StorageProvider {
 
             try {
                 try (PreparedStatement ps = conn.prepareStatement(upsertSql())) {
-                    Set<String> allQuests = new HashSet<>();
-                    allQuests.addAll(d.getActiveQuests());
-                    allQuests.addAll(d.getCompletedQuests());
-
-                    for (String qid : allQuests) {
+                    for (var entry : d.snapshot().entrySet()) {
+                        PlayerData.QuestState state = entry.getValue();
                         ps.setString(1, d.getId().toString());
-                        ps.setString(2, qid);
-                        ps.setInt(3, d.isActive(qid) ? 1 : 0);
-                        ps.setInt(4, d.isCompleted(qid) ? 1 : 0);
-                        ps.setInt(5, d.valueOf(qid));
-                        ps.setInt(6, d.pointsOf(qid));
-                        ps.setInt(7, d.getRepeatCount(qid));
+                        ps.setString(2, entry.getKey());
+                        ps.setInt(3, state.active() ? 1 : 0);
+                        ps.setInt(4, state.completed() ? 1 : 0);
+                        ps.setInt(5, state.value());
+                        ps.setInt(6, state.points());
+                        ps.setInt(7, state.repeatCount());
                         ps.addBatch();
                     }
                     ps.executeBatch();

@@ -1,10 +1,9 @@
 package com.gmail.bobason01.questengine.quest;
 
-import org.bukkit.configuration.file.YamlConfiguration;
+import com.gmail.bobason01.questengine.runtime.EventAliases;
 import org.bukkit.plugin.Plugin;
 
 import java.io.File;
-import java.io.IOException;
 import java.util.*;
 
 public final class QuestRepository {
@@ -13,7 +12,7 @@ public final class QuestRepository {
     private final File dir;
 
     private volatile Map<String, QuestDef> byId = Collections.emptyMap();
-    private volatile Map<String, List<QuestDef>> byEvent = Collections.emptyMap();
+    private volatile Map<String, QuestDef[]> byEventArr = Collections.emptyMap();
 
     private static final QuestDef[] EMPTY_ARRAY = new QuestDef[0];
 
@@ -33,11 +32,11 @@ public final class QuestRepository {
         if (files == null || files.length == 0) {
             plugin.getLogger().info("[QuestEngine] No quest files found in " + dir.getName());
             this.byId = Collections.emptyMap();
-            this.byEvent = Collections.emptyMap();
+            this.byEventArr = Collections.emptyMap();
             return;
         }
 
-        Map<String, QuestDef> newById = new HashMap<>(files.length);
+        Map<String, QuestDef> newById = new HashMap<>(files.length * 2);
         Map<String, List<QuestDef>> newByEvent = new HashMap<>();
 
         int count = 0;
@@ -53,7 +52,7 @@ public final class QuestRepository {
                 newById.put(lid, q);
 
                 if (q.event != null && !q.event.isBlank()) {
-                    String evtKey = q.event.trim().toUpperCase(Locale.ROOT);
+                    String evtKey = EventAliases.canonicalize(q.event);
                     newByEvent.computeIfAbsent(evtKey, k -> new ArrayList<>()).add(q);
                 }
                 count++;
@@ -63,18 +62,20 @@ public final class QuestRepository {
             }
         }
 
+        Map<String, QuestDef[]> arrMap = new HashMap<>(newByEvent.size() * 2);
         for (Map.Entry<String, List<QuestDef>> e : newByEvent.entrySet()) {
-            e.setValue(List.copyOf(e.getValue()));
+            QuestDef[] arr = e.getValue().toArray(EMPTY_ARRAY);
+            arrMap.put(e.getKey(), arr);
         }
 
         this.byId = Map.copyOf(newById);
-        this.byEvent = Map.copyOf(newByEvent);
+        this.byEventArr = Map.copyOf(arrMap);
 
         plugin.getLogger().info("[QuestEngine] Loaded " + count + " quests (Hot-Swapped)");
     }
 
     public void rebuildEventMap() {
-        plugin.getLogger().info("[QuestEngine] Event map is managed by reload()");
+        // Event arrays are rebuilt atomically inside reload()
     }
 
     public QuestDef get(String id) {
@@ -92,23 +93,11 @@ public final class QuestRepository {
 
     public QuestDef[] byEvent(String eventKey) {
         if (eventKey == null || eventKey.isBlank()) return EMPTY_ARRAY;
-        List<QuestDef> list = byEvent.get(eventKey.trim().toUpperCase(Locale.ROOT));
-        return list == null ? EMPTY_ARRAY : list.toArray(EMPTY_ARRAY);
+        QuestDef[] list = byEventArr.get(EventAliases.canonicalize(eventKey));
+        return list == null ? EMPTY_ARRAY : list;
     }
 
     public Collection<QuestDef> all() {
         return byId.values();
-    }
-
-    public void saveToFile(QuestDef quest) {
-        if (quest == null || quest.id == null) return;
-        File out = new File(dir, quest.id + ".yml");
-        try {
-            YamlConfiguration yaml = QuestDef.toYaml(quest);
-            yaml.save(out);
-            plugin.getLogger().info("[QuestEngine] Saved quest " + quest.id);
-        } catch (IOException ex) {
-            plugin.getLogger().warning("[QuestEngine] Failed to save quest " + quest.id + ": " + ex.getMessage());
-        }
     }
 }

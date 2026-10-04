@@ -106,6 +106,10 @@ public final class ActionExecutor {
         executeEntries(entries, q, p);
     }
 
+    public void clearCache() {
+        actionCache.clear();
+    }
+
     public void run(QuestDef q, String type, Player p) {
         runAll(q, type, p);
     }

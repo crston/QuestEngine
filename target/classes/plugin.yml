@@ -1,11 +1,16 @@
 name: QuestEngine
 main: com.gmail.bobason01.questengine.QuestEnginePlugin
-version: 70.0
+version: 81.0
 api-version: 1.18
 author: crston
 softdepend:
   - PlaceholderAPI
   - Vault
+  - MythicMobs
+  - Citizens
+  - Parties
+  - MMOCore
+  - MythicDungeons
 commands:
   quest:
     description: Player quest command

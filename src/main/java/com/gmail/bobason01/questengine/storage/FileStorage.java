@@ -43,15 +43,7 @@ public final class FileStorage implements StorageProvider {
                     try { repeatCount = in.readInt(); } catch (EOFException ignored) {}
                 }
 
-                if (active) data.start(qid);
-                if (value > 0) data.add(qid, value);
-
-                if (repeatCount > 0) data.setRepeatCount(qid, repeatCount);
-
-                if (completed) {
-                    data.complete(qid, points);
-                    if (data.getRepeatCount(qid) == 0) data.setRepeatCount(qid, 1);
-                }
+                data.restoreQuest(qid, active, completed, value, points, repeatCount);
             }
 
             if (in.available() > 0) {
@@ -74,18 +66,16 @@ public final class FileStorage implements StorageProvider {
         File tmp = new File(folder, d.getId() + ".dat.tmp");
 
         try (DataOutputStream out = new DataOutputStream(new BufferedOutputStream(new FileOutputStream(tmp)))) {
-            Set<String> all = new HashSet<>();
-            all.addAll(d.activeIds());
-            all.addAll(d.completedIds());
-
-            out.writeInt(all.size());
-            for (String qid : all) {
-                out.writeUTF(qid);
-                out.writeBoolean(d.isActive(qid));
-                out.writeBoolean(d.isCompleted(qid));
-                out.writeInt(d.valueOf(qid));
-                out.writeInt(d.pointsOf(qid));
-                out.writeInt(d.getRepeatCount(qid));
+            Map<String, PlayerData.QuestState> states = d.snapshot();
+            out.writeInt(states.size());
+            for (var entry : states.entrySet()) {
+                PlayerData.QuestState state = entry.getValue();
+                out.writeUTF(entry.getKey());
+                out.writeBoolean(state.active());
+                out.writeBoolean(state.completed());
+                out.writeInt(state.value());
+                out.writeInt(state.points());
+                out.writeInt(state.repeatCount());
             }
 
             out.writeUTF(d.getLanguage());

@@ -4,10 +4,12 @@ import com.gmail.bobason01.questengine.quest.QuestDef;
 import java.io.Serializable;
 import java.util.*;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.concurrent.atomic.AtomicLong;
 
 public final class PlayerData implements Serializable {
 
     private static final long serialVersionUID = 5L;
+    private static final AtomicLong REVISION_SEQUENCE = new AtomicLong();
 
     private final UUID id;
     private volatile String name;
@@ -24,6 +26,7 @@ public final class PlayerData implements Serializable {
         int value;
         int points;
         int completedCount;
+        transient long revision;
     }
 
     public PlayerData(UUID id, String name) {
@@ -76,6 +79,17 @@ public final class PlayerData implements Serializable {
     public boolean isCompleted(String qid) {
         lock.readLock().lock();
         try { Node n = map.get(norm(qid)); return n != null && n.completed; } finally { lock.readLock().unlock(); }
+    }
+
+    /** True if the quest was cleared at least once (including repeatable mid-cycle). */
+    public boolean hasSatisfiedRequirement(String qid) {
+        lock.readLock().lock();
+        try {
+            Node n = map.get(norm(qid));
+            return n != null && (n.completed || n.completedCount > 0);
+        } finally {
+            lock.readLock().unlock();
+        }
     }
 
     public int valueOf(String qid) {
@@ -139,6 +153,68 @@ public final class PlayerData implements Serializable {
         } finally { lock.readLock().unlock(); }
     }
 
+    /** Immutable storage snapshot, including inactive repeat history. */
+    public record QuestState(boolean active, boolean completed, int value, int points, int repeatCount) {}
+
+    public Map<String, QuestState> snapshot() {
+        lock.readLock().lock();
+        try {
+            Map<String, QuestState> out = new LinkedHashMap<>();
+            Set<String> ids = new LinkedHashSet<>(activeOrder);
+            ids.addAll(map.keySet());
+            for (String id : ids) {
+                Node n = map.get(id);
+                out.put(id, new QuestState(n.active, n.completed, n.value, n.points, n.completedCount));
+            }
+            return Collections.unmodifiableMap(out);
+        } finally { lock.readLock().unlock(); }
+    }
+
+    /** Restore persisted values without performing a new completion. */
+    public void restoreQuest(String qid, boolean active, boolean completed, int value, int points, int count) {
+        String key = norm(qid);
+        lock.writeLock().lock();
+        try {
+            Node n = map.computeIfAbsent(key, k -> new Node());
+            n.active = active;
+            n.completed = completed;
+            n.value = Math.max(0, value);
+            n.points = points;
+            n.completedCount = Math.max(completed ? 1 : 0, count);
+            n.revision = REVISION_SEQUENCE.incrementAndGet();
+            if (active) activeOrder.add(key); else activeOrder.remove(key);
+        } finally { lock.writeLock().unlock(); }
+    }
+
+    public long completionRevision(String qid) {
+        lock.readLock().lock();
+        try {
+            Node n = map.get(norm(qid));
+            return n != null && n.active ? n.revision : -1;
+        } finally { lock.readLock().unlock(); }
+    }
+
+    /** Add progress and capture the cycle under the same lock. */
+    public long advanceForCompletion(String qid, int amount, int target) {
+        lock.writeLock().lock();
+        try {
+            Node n = map.get(norm(qid));
+            if (n == null || !n.active) return -1;
+            n.value = Math.max(0, n.value + amount);
+            return n.value >= target ? n.revision : -1;
+        } finally { lock.writeLock().unlock(); }
+    }
+
+    public boolean completeIfActive(String qid, int points, int repeat, long revision) {
+        lock.writeLock().lock();
+        try {
+            Node n = map.get(norm(qid));
+            if (n == null || !n.active || n.revision != revision) return false;
+            complete(qid, points, repeat);
+            return true;
+        } finally { lock.writeLock().unlock(); }
+    }
+
     // --- Write Operations (Resolving Symbols) ---
 
     public void start(String qid) {
@@ -146,6 +222,7 @@ public final class PlayerData implements Serializable {
         lock.writeLock().lock();
         try {
             Node n = map.computeIfAbsent(key, k -> new Node());
+            n.revision = REVISION_SEQUENCE.incrementAndGet();
             n.active = true;
             activeOrder.add(key);
         } finally { lock.writeLock().unlock(); }
@@ -156,7 +233,7 @@ public final class PlayerData implements Serializable {
         lock.writeLock().lock();
         try {
             Node n = map.get(key);
-            if (n != null) { n.active = false; n.value = 0; }
+            if (n != null) { n.revision = REVISION_SEQUENCE.incrementAndGet(); n.active = false; n.value = 0; }
             activeOrder.remove(key);
         } finally { lock.writeLock().unlock(); }
     }
@@ -170,6 +247,7 @@ public final class PlayerData implements Serializable {
         lock.writeLock().lock();
         try {
             Node n = map.computeIfAbsent(key, k -> new Node());
+            n.revision = REVISION_SEQUENCE.incrementAndGet();
             n.active = false;
             n.value = 0;
             if (pts > n.points) n.points = pts;
@@ -195,7 +273,7 @@ public final class PlayerData implements Serializable {
         try {
             Node n = map.get(key);
             if (n == null) return;
-            n.active = false; n.completed = false; n.value = 0;
+            n.revision = REVISION_SEQUENCE.incrementAndGet(); n.active = false; n.completed = false; n.value = 0;
             n.points = 0; n.completedCount = 0;
             activeOrder.remove(key);
         } finally { lock.writeLock().unlock(); }
@@ -212,7 +290,7 @@ public final class PlayerData implements Serializable {
     public void cancelAll() {
         lock.writeLock().lock();
         try {
-            for (Node n : map.values()) { n.active = false; n.value = 0; }
+            for (Node n : map.values()) { n.revision = REVISION_SEQUENCE.incrementAndGet(); n.active = false; n.value = 0; }
             activeOrder.clear();
         } finally { lock.writeLock().unlock(); }
     }

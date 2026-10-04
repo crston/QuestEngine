@@ -8,10 +8,10 @@ import com.gmail.bobason01.questengine.quest.CustomEventData;
 import com.gmail.bobason01.questengine.quest.QuestDef;
 import com.gmail.bobason01.questengine.quest.QuestRepository;
 import com.gmail.bobason01.questengine.util.Msg;
-import io.lumine.mythic.bukkit.events.MythicMobDeathEvent;
 import me.clip.placeholderapi.PlaceholderAPI;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.Event;
 import org.bukkit.event.block.BlockBreakEvent;
@@ -19,6 +19,7 @@ import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.player.AsyncPlayerChatEvent;
 import org.bukkit.event.player.PlayerCommandPreprocessEvent;
+import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.plugin.Plugin;
 
 import java.lang.reflect.Method;
@@ -121,7 +122,8 @@ public final class Engine {
     private boolean checkRequirements(UUID uid, String name, QuestDef def) {
         if (def.requiredQuests == null || def.requiredQuests.isEmpty()) return true;
         for (String reqId : def.requiredQuests) {
-            if (!progress.isCompleted(uid, name, reqId)) return false;
+            // Once-cleared is enough for prerequisites (repeatable quests stay incomplete until slots fill)
+            if (!progress.hasSatisfiedRequirement(uid, name, reqId)) return false;
         }
         return true;
     }
@@ -201,24 +203,23 @@ public final class Engine {
     public void handleDynamic(Event event) {
         if (event == null) return;
 
-        List<QuestDef> matchedCustomDefs = new ArrayList<>();
+        // Bridges own PlayerInteractEntityEvent (CITIZENS:/MYTHICMOBS:/ENTITY:) to avoid double progress
+        if (event instanceof PlayerInteractEntityEvent) return;
 
+        List<QuestDef> matchedCustomDefs = null;
         for (Map.Entry<Class<?>, List<QuestDef>> entry : customEventRegistry.entrySet()) {
-            Class<?> registeredClass = entry.getKey();
-            if (registeredClass.isInstance(event)) {
+            if (entry.getKey().isInstance(event)) {
+                if (matchedCustomDefs == null) matchedCustomDefs = new ArrayList<>(2);
                 matchedCustomDefs.addAll(entry.getValue());
             }
         }
 
-        if (!matchedCustomDefs.isEmpty()) {
+        if (matchedCustomDefs != null && !matchedCustomDefs.isEmpty()) {
             handleCustomDynamic(event, matchedCustomDefs);
             return;
         }
 
         Player player = EventContextMapper.extractPlayer(event);
-        if (player == null && event instanceof EntityDeathEvent) {
-            player = ((EntityDeathEvent) event).getEntity().getKiller();
-        }
         if (player == null) return;
 
         String key = guessEventKeyFromClass(event.getClass().getSimpleName());
@@ -267,11 +268,8 @@ public final class Engine {
     private String resolveTargetLabel(Event event) {
         if (event instanceof BlockBreakEvent) return ((BlockBreakEvent) event).getBlock().getType().name();
         if (event instanceof BlockPlaceEvent) return ((BlockPlaceEvent) event).getBlockPlaced().getType().name();
-        if (Bukkit.getPluginManager().isPluginEnabled("MythicMobs")) {
-            if (event instanceof MythicMobDeathEvent) {
-                return ((MythicMobDeathEvent) event).getMobType().getInternalName();
-            }
-        }
+        String mythic = EventContextMapper.extractMythicInternalName(event);
+        if (mythic != null) return mythic;
         if (event instanceof EntityDeathEvent) return ((EntityDeathEvent) event).getEntity().getType().name();
         if (event instanceof PlayerCommandPreprocessEvent) {
             String msgText = ((PlayerCommandPreprocessEvent) event).getMessage();
@@ -316,9 +314,15 @@ public final class Engine {
                     if (!checkConditions(actor, event, ctx, def.condStart)) continue;
 
                     progress.start(uid, name, def);
-                    actions.runAll(def, "accept", beneficiary);
-                    actions.runAll(def, "start", beneficiary);
-                    beneficiary.sendMessage(format(beneficiary, msg.get(beneficiary, "quest_started").replace("%quest_name%", def.name)));
+                    final QuestDef started = def;
+                    final Player startedPlayer = beneficiary;
+                    if (pending == null) pending = new ArrayList<>(2);
+                    pending.add(() -> {
+                        actions.runAll(started, "accept", startedPlayer);
+                        actions.runAll(started, "start", startedPlayer);
+                        startedPlayer.sendMessage(format(startedPlayer,
+                                msg.get(startedPlayer, "quest_started").replace("%quest_name%", started.name)));
+                    });
                     active = true;
                 }
 
@@ -338,10 +342,10 @@ public final class Engine {
 
                 if (!checkConditions(actor, event, ctx, def.condSuccess)) continue;
 
-                int value = progress.addProgress(uid, name, def.id, 1);
-                if (value >= def.amount) {
+                long revision = progress.advanceForCompletion(uid, name, def);
+                if (revision >= 0) {
                     if (pending == null) pending = new ArrayList<>();
-                    pending.add(() -> handleQuestCompleteOnMain(beneficiary, def));
+                    pending.add(() -> handleQuestCompleteOnMain(beneficiary, def, revision));
                 }
             }
         }
@@ -382,10 +386,10 @@ public final class Engine {
 
                 if (!checkConditions(actor, null, ctx, def.condSuccess)) continue;
 
-                int value = progress.addProgress(uid, name, def.id, 1);
-                if (value >= def.amount) {
+                long revision = progress.advanceForCompletion(uid, name, def);
+                if (revision >= 0) {
                     if (pending == null) pending = new ArrayList<>();
-                    pending.add(() -> handleQuestCompleteOnMain(beneficiary, def));
+                    pending.add(() -> handleQuestCompleteOnMain(beneficiary, def, revision));
                 }
             }
         }
@@ -422,7 +426,8 @@ public final class Engine {
             if (!completed) {
                 if (!checkAnyFail(player, null, ctx, candidate.condFail) && checkConditions(player, null, ctx, candidate.condSuccess)) {
                     QuestDef finalCandidate = candidate;
-                    Bukkit.getScheduler().runTask(plugin, () -> handleQuestCompleteOnMain(player, finalCandidate));
+                    long revision = progress.of(uid, name).completionRevision(candidate.id);
+                    Bukkit.getScheduler().runTask(plugin, () -> handleQuestCompleteOnMain(player, finalCandidate, revision));
                 }
             }
             npcArm.remove(uid);
@@ -445,11 +450,11 @@ public final class Engine {
         npcArm.put(uid, new NpcArmState(candidate.id, now + NPC_ARM_WINDOW_NANOS));
     }
 
-    private void handleQuestCompleteOnMain(Player player, QuestDef def) {
+    private void handleQuestCompleteOnMain(Player player, QuestDef def, long revision) {
         UUID uid = player.getUniqueId();
         String name = player.getName();
+        if (!progress.completeIfActive(uid, name, def, revision)) return;
         actions.runAll(def, "success", player);
-        progress.complete(uid, name, def);
         player.sendMessage(format(player, msg.get(player, "quest_completed").replace("%quest_name%", def.name)));
         runCompletionFlow(player, def);
     }
@@ -605,6 +610,7 @@ public final class Engine {
         quests.reload();
         quests.rebuildEventMap();
         tokenCache.clear();
+        conditionCache.clear();
         rebuildCustomEventIndex();
     }
 
@@ -651,7 +657,16 @@ public final class Engine {
 
     private boolean cachedEval(Player player, Event event, Map<String, Object> ctx, String expr) {
         if (expr == null || expr.isEmpty()) return true;
-        String key = player.getUniqueId() + "|" + expr;
+
+        // Event/context-dependent expressions must not share a player-only cache key
+        boolean contextual = isContextualExpression(expr);
+        String key;
+        if (contextual) {
+            key = player.getUniqueId() + "|" + expr + "|" + contextFingerprint(ctx);
+        } else {
+            key = player.getUniqueId() + "|" + expr;
+        }
+
         long now = System.nanoTime();
         BoolCacheEntry ent = conditionCache.get(key);
         if (ent != null && ent.expireAt > now) return ent.value;
@@ -660,12 +675,48 @@ public final class Engine {
         return val;
     }
 
+    private static boolean isContextualExpression(String expr) {
+        String e = expr.toLowerCase(Locale.ROOT);
+        return e.contains("block_type")
+                || e.contains("entity_type")
+                || e.contains("mythicmob")
+                || e.contains("item_type")
+                || e.contains("item_name")
+                || e.contains("gui_id")
+                || e.contains("hotkey")
+                || e.contains("damager")
+                || e.contains("victim")
+                || e.contains("killer")
+                || e.contains("event.")
+                || e.contains("target_id")
+                || e.contains("projectile");
+    }
+
+    private static String contextFingerprint(Map<String, Object> ctx) {
+        if (ctx == null || ctx.isEmpty()) return "-";
+        // Stable enough for short TTL; avoids hashing whole map allocation-heavy paths
+        Object[] keys = {
+                ctx.get("block_type"), ctx.get("entity_type"), ctx.get("mythicmob_type"),
+                ctx.get("item_type"), ctx.get("target_id"), ctx.get("gui_id"),
+                ctx.get("hotkey_name"), ctx.get("damager_type"), ctx.get("victim_type")
+        };
+        int h = 1;
+        for (Object o : keys) {
+            h = 31 * h + (o == null ? 0 : o.hashCode());
+        }
+        return Integer.toHexString(h);
+    }
+
     private boolean isDedup(UUID uid, String key) {
         long now = System.nanoTime();
-        Map<String, Long> m = recentEventWindow.computeIfAbsent(uid, k -> new ConcurrentHashMap<>());
+        Map<String, Long> m = recentEventWindow.computeIfAbsent(uid, k -> new ConcurrentHashMap<>(4));
         Long last = m.get(key);
         if (last != null && now - last < dedupWindowNanos) return true;
         m.put(key, now);
+        // Opportunistic prune to keep maps tiny under high TPS
+        if (m.size() > 64) {
+            m.entrySet().removeIf(e -> now - e.getValue() > dedupWindowNanos * 100);
+        }
         return false;
     }
 
@@ -691,14 +742,38 @@ public final class Engine {
 
     private boolean checkTokens(String value, String rawTarget) {
         if (rawTarget == null || rawTarget.isEmpty()) return true;
-        if (rawTarget.equals("*")) return true;
+        if ("*".equals(rawTarget)) return true;
+        if (value == null) return false;
+
         Set<String> tokens = getParsedTokens(rawTarget);
         String v = value.toUpperCase(Locale.ROOT);
-        if (tokens.contains(v)) return true;
+
+        boolean hasPositive = false;
+        boolean positiveHit = false;
+        boolean hasNegation = false;
 
         for (String tok : tokens) {
-            if (tok.startsWith("!") && !v.equals(tok.substring(1).toUpperCase(Locale.ROOT))) return true;
-            if (v.contains(tok)) return true;
+            if (tok.startsWith("!")) {
+                hasNegation = true;
+                String forbidden = tok.substring(1);
+                if (v.equals(forbidden)) return false;
+                continue;
+            }
+            hasPositive = true;
+            if (tokEqualsOrGlob(v, tok)) positiveHit = true;
+        }
+
+        if (hasPositive) return positiveHit;
+        // Pure negation list: pass if none of the forbidden tokens matched (already checked)
+        return hasNegation;
+    }
+
+    private static boolean tokEqualsOrGlob(String value, String token) {
+        if (token.equals(value)) return true;
+        // Explicit prefix glob only: ZOMBIE* matches ZOMBIE / ZOMBIE_VILLAGER, not WITHER_SKELETON for SKELETON
+        if (token.endsWith("*") && token.length() > 1) {
+            String prefix = token.substring(0, token.length() - 1);
+            return value.startsWith(prefix);
         }
         return false;
     }
@@ -718,12 +793,36 @@ public final class Engine {
             if (!(event instanceof EntityDeathEvent)) return false;
             return checkTokens(((EntityDeathEvent) event).getEntity().getType().name(), target);
         });
-        matchers.put("mythicmobs_entity_kill", (player, event, target) -> {
-            if (event instanceof MythicMobDeathEvent) {
-                return checkTokens(((MythicMobDeathEvent) event).getMobType().getInternalName(), target);
-            }
-            return false;
+        matchers.put("mobkilling", matchers.get("entity_kill"));
+        matchers.put("entity_death", matchers.get("entity_kill"));
+        matchers.put("player_kill", (player, event, target) -> {
+            if (!(event instanceof EntityDeathEvent de)) return false;
+            if (!(de.getEntity() instanceof Player)) return false;
+            return checkTokens("PLAYER", target) || checkTokens(de.getEntity().getType().name(), target);
         });
+
+        TargetMatcher mythicKill = (player, event, target) -> {
+            String name = EventContextMapper.extractMythicInternalName(event);
+            if (name == null) return false;
+            return checkTokens(name, target);
+        };
+        matchers.put("mythicmobs_entity_kill", mythicKill);
+        matchers.put("mythicmobs_kill", mythicKill);
+
+        matchers.put("entity_interact", (player, event, target) -> {
+            if (target == null || "*".equals(target)) return true;
+            if (!(event instanceof PlayerInteractEntityEvent pie)) {
+                // Custom path may only provide target_id in ctx; matcher without ctx → accept non-empty target via equals later
+                return true;
+            }
+            Entity clicked = pie.getRightClicked();
+            if (clicked == null) return false;
+            String typeName = clicked.getType().name();
+            return checkTokens(typeName, target)
+                    || checkTokens("ENTITY:" + typeName, target)
+                    || QuestDef.normalizeInteractTarget(target).equalsIgnoreCase("ENTITY:" + typeName);
+        });
+
         matchers.put("player_command", (player, event, target) -> {
             if (!(event instanceof PlayerCommandPreprocessEvent e)) return false;
             String msgText = e.getMessage().toLowerCase(Locale.ROOT);
@@ -816,7 +915,7 @@ public final class Engine {
     }
 
     private String normalizeEventKey(String key) {
-        return (key == null) ? "" : key.trim().toUpperCase(Locale.ROOT);
+        return EventAliases.canonicalize(key);
     }
 
     private String guessEventKeyFromClass(String simpleName) {
@@ -824,11 +923,19 @@ public final class Engine {
         String k = simpleName;
         if (k.endsWith("Event")) k = k.substring(0, k.length() - 5);
         if (k.equalsIgnoreCase("MythicMobDeath")) return "MYTHICMOBS_ENTITY_KILL";
+        if (k.equalsIgnoreCase("MythicMobSpawn")) return "MYTHICMOBS_ENTITY_SPAWN";
         if (k.equalsIgnoreCase("PlayerInteractEntity")) return "ENTITY_INTERACT";
-        if (k.equalsIgnoreCase("EntityDeath")) return "MOBKILLING";
+        if (k.equalsIgnoreCase("EntityDeath")) return "ENTITY_KILL";
         if (k.equalsIgnoreCase("GUIOpen")) return "GUIMANAGER_OPEN";
         if (k.equalsIgnoreCase("HotkeyInput")) return "HOTKEY_INPUT";
-        return k.replace("MythicMob", "MYTHICMOBS_").replace("Player", "PLAYER_").replace("Entity", "ENTITY_").replace("Block", "BLOCK_").toUpperCase(Locale.ROOT);
+        if (k.equalsIgnoreCase("ChunkLoad")) return "WORLD_CHUNK_LOAD";
+        return EventAliases.canonicalize(
+                k.replace("MythicMob", "MYTHICMOBS_")
+                        .replace("Player", "PLAYER_")
+                        .replace("Entity", "ENTITY_")
+                        .replace("Block", "BLOCK_")
+                        .toUpperCase(Locale.ROOT)
+        );
     }
 
     private Class<?> resolveClass(String className) {
